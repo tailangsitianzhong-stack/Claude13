@@ -16,11 +16,26 @@ export const MOVE = {
   landTime: 0.16,     // 着地の沈み込み
 };
 
+// 連続攻撃。攻撃ボタンを押し続ける（または連打する）と 1 → 2 → 3 → 1 … と繰り返す。
+//   duration: 全体の長さ（秒）
+//   active  : 剣が当たる区間（モーションの進み具合 0〜1）
+//   chain   : ここを過ぎたら次の攻撃へつなげられる
+//   lunge   : 踏み込みで前へ進む区間と速さ（リグ単位/秒）
+//   power   : 命中時の強さ（のけぞり・ヒットストップ・画面揺れに影響）
+export const ATTACKS = [
+  { anim: 'attack1', duration: 0.46, active: [0.36, 0.64], chain: 0.72, lunge: [0.28, 0.5, 10], power: 1 },
+  { anim: 'attack2', duration: 0.44, active: [0.34, 0.64], chain: 0.72, lunge: [0.26, 0.5, 10], power: 1 },
+  { anim: 'attack3', duration: 0.68, active: [0.5, 0.71], chain: 0.86, lunge: [0.24, 0.58, 14], power: 2 },
+];
+export const IDEAL_RANGE = 3.9; // 踏み込みで詰める間合い（リグ単位）。これより近づかない
+export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
+
 const TWO_PI = Math.PI * 2;
+const angleDiff = (a, b) => { const d = a - b; return d - TWO_PI * Math.round(d / TWO_PI); };
 
 /**
  * キャラの移動・ジャンプと、それに合わせたモーション切り替え。
- * command = { x, z（ワールドでの進みたい向き。長さ0〜1）, run, jump, toggleStance }
+ * command = { x, z（ワールドでの進みたい向き。長さ0〜1）, run, jump, attack（押している間 true）, toggleStance }
  */
 export class CharacterController {
   constructor(character, { bounds } = {}) {
@@ -29,10 +44,59 @@ export class CharacterController {
     this.vx = 0;
     this.vz = 0;
     this.vy = 0;
-    this.state = 'ground'; // 'ground' | 'crouch' | 'air' | 'land'
+    this.state = 'ground'; // 'ground' | 'crouch' | 'air' | 'land' | 'attack' | 'hit'
     this.timer = 0;
     this.idle = 'stand';   // 止まっているときのポーズ: 'stand' | 'fight'
     this.jumpBuffer = 0;
+
+    this.target = null;       // 攻撃時に自動で向く相手（Character）
+    this.attackIndex = 0;     // 今出している攻撃の番号
+    this.attackT = 0;         // その攻撃の進み具合 0 → 1
+    this.attackActive = false; // 剣が当たる区間か
+    this.hitDone = false;     // この一振りで既に当てたか
+    this.aimYaw = 0;
+    this.hitDuration = 0.4;
+    this.events = [];         // { type: 'attackStart' | 'swing', index } 演出用。毎フレーム読む側が空にする
+  }
+
+  startAttack(index, cmd) {
+    const { group, animator } = this.c;
+    this.state = 'attack';
+    this.attackIndex = index;
+    this.attackT = 0;
+    this.attackActive = false;
+    this.hitDone = false;
+    animator.attackT = 0;
+    animator.play(ATTACKS[index].anim, index === 0 ? 0.08 : 0.1);
+
+    // 向き: 入力があればその方向、なければ今の向き。近くに相手がいればそちらを優先
+    this.aimYaw = Math.hypot(cmd.x, cmd.z) > 0.01 ? Math.atan2(cmd.x, cmd.z) : group.rotation.y;
+    if (this.target) {
+      const dx = this.target.group.position.x - group.position.x;
+      const dz = this.target.group.position.z - group.position.z;
+      const yaw = Math.atan2(dx, dz);
+      if (Math.hypot(dx, dz) < AIM_ASSIST.range * this.c.scale && Math.abs(angleDiff(yaw, this.aimYaw)) < AIM_ASSIST.angle) {
+        this.aimYaw = yaw;
+      }
+    }
+    this.events.push({ type: 'attackStart', index });
+  }
+
+  // 攻撃を受けた: (dx, dz) の向きへ吹き飛び、のけぞる
+  hit(dx, dz, power = 1) {
+    const { group, animator, scale } = this.c;
+    const len = Math.hypot(dx, dz) || 1;
+    const speed = (power > 1 ? 13 : 8) * scale;
+    this.vx = (dx / len) * speed;
+    this.vz = (dz / len) * speed;
+    this.vy = 0;
+    group.position.y = 0;
+    this.state = 'hit';
+    this.hitDuration = power > 1 ? 0.6 : 0.4;
+    this.attackActive = false;
+    animator.trailOn = false;
+    animator.hitT = 0;
+    animator.play('hit', 0.04);
   }
 
   update(dt, cmd) {
@@ -48,9 +112,34 @@ export class CharacterController {
 
     // ---- 水平移動 ----
     const control = this.state === 'air' ? MOVE.airControl : this.state === 'ground' ? 1 : 0.5;
-    const tx = moving ? cmd.x * topSpeed : 0;
-    const tz = moving ? cmd.z * topSpeed : 0;
-    const rate = (moving ? MOVE.accel : MOVE.decel) * S * control * dt;
+    let tx = moving ? cmd.x * topSpeed : 0;
+    let tz = moving ? cmd.z * topSpeed : 0;
+    let rate = (moving ? MOVE.accel : MOVE.decel) * S * control * dt;
+    if (this.state === 'attack') {
+      // 攻撃中は歩けない。踏み込みの区間だけ、向いている方へ進む
+      const [from, to, lungeSpeed] = ATTACKS[this.attackIndex].lunge;
+      let v = this.attackT >= from && this.attackT <= to ? lungeSpeed * S : 0;
+      // 正面に相手がいるときは、剣がちょうど届く間合いまで詰めて止まる（体が重ならない・空振りしにくい）
+      if (this.target && v > 0) {
+        const ddx = this.target.group.position.x - group.position.x;
+        const ddz = this.target.group.position.z - group.position.z;
+        const ahead = Math.sin(group.rotation.y) * ddx + Math.cos(group.rotation.y) * ddz;
+        const dist = Math.hypot(ddx, ddz);
+        if (ahead > 0 && dist < AIM_ASSIST.range * S) {
+          // 斬る瞬間（踏み込みの終わり）にちょうど間合いへ着く速さ。離れていれば速く、近ければ止まる
+          const gap = dist - IDEAL_RANGE * S;
+          const remaining = Math.max(dt, (to - this.attackT) * ATTACKS[this.attackIndex].duration);
+          v = Math.max(0, Math.min(lungeSpeed * 2.6 * S, gap / remaining));
+        }
+      }
+      tx = Math.sin(group.rotation.y) * v;
+      tz = Math.cos(group.rotation.y) * v;
+      rate = 160 * S * dt;
+    } else if (this.state === 'hit') {
+      tx = 0;
+      tz = 0;
+      rate = 38 * S * dt; // 吹き飛びの減速
+    }
     const dx = tx - this.vx;
     const dz = tz - this.vz;
     const dist = Math.hypot(dx, dz);
@@ -68,12 +157,14 @@ export class CharacterController {
       if (cz !== group.position.z) { group.position.z = cz; this.vz = 0; }
     }
 
-    // 進む向きへなめらかに振り向く
-    if (moving) {
+    // 進む向きへなめらかに振り向く（攻撃中は振りかぶりの間だけ、狙った向きへ素早く）
+    if (this.state === 'attack') {
+      if (this.attackT < ATTACKS[this.attackIndex].active[0]) {
+        group.rotation.y += angleDiff(this.aimYaw, group.rotation.y) * (1 - Math.exp(-MOVE.turnRate * 2 * dt));
+      }
+    } else if (moving && this.state !== 'hit') {
       const want = Math.atan2(cmd.x, cmd.z);
-      let diff = want - group.rotation.y;
-      diff -= TWO_PI * Math.round(diff / TWO_PI);
-      group.rotation.y += diff * (1 - Math.exp(-MOVE.turnRate * dt));
+      group.rotation.y += angleDiff(want, group.rotation.y) * (1 - Math.exp(-MOVE.turnRate * dt));
     }
 
     const speed = Math.hypot(this.vx, this.vz) / S; // リグ単位
@@ -91,6 +182,8 @@ export class CharacterController {
           this.state = 'crouch';
           this.timer = MOVE.crouchTime;
           animator.play('crouch', 0.07);
+        } else if (cmd.attack && this.c.sword) {
+          this.startAttack(0, cmd);
         } else if (speed > 0.4) {
           if (animator.name === 'stand' || animator.name === 'fight') animator.phase = 0; // 歩き出しは左足から
           animator.play(running ? 'run' : 'walk', 0.18);
@@ -126,6 +219,30 @@ export class CharacterController {
       case 'land': {
         this.timer -= dt;
         if (this.timer <= 0) this.state = 'ground';
+        break;
+      }
+      case 'attack': {
+        const a = ATTACKS[this.attackIndex];
+        this.attackT += dt / a.duration;
+        animator.attackT = Math.min(1, this.attackT);
+        const active = this.attackT >= a.active[0] && this.attackT <= a.active[1];
+        if (active && !this.attackActive) this.events.push({ type: 'swing', index: this.attackIndex });
+        if (!active && this.attackActive && a.power > 1) this.events.push({ type: 'slam', index: this.attackIndex }); // 兜割りの着地
+        this.attackActive = active;
+        // 軌跡は当たり判定より少し早く出し始めて、振り始めから弧が見えるようにする
+        animator.trailOn = this.attackT >= a.active[0] - 0.08 && this.attackT <= a.active[1] + 0.03;
+        if (this.attackT >= a.chain && cmd.attack) {
+          this.startAttack((this.attackIndex + 1) % ATTACKS.length, cmd); // 押し続けていれば次の斬撃へ
+        } else if (this.attackT >= 1) {
+          this.attackActive = false;
+          animator.trailOn = false;
+          this.state = 'ground';
+        }
+        break;
+      }
+      case 'hit': {
+        animator.hitT = Math.min(1, animator.hitT + dt / this.hitDuration);
+        if (animator.hitT >= 1) this.state = 'ground';
         break;
       }
     }

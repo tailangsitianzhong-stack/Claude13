@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { faceTexture } from './face.js';
 import { Animator } from './Animator.js';
 import { RIG } from './rig.js';
+import { createSword } from './Sword.js';
+import { SwordTrail } from '../effects/SwordTrail.js';
 
 // ロブロックス風の低コストキャラ。全部ただの箱＋顔デカール1枚。
 // キャラは +Z を向く。キャラ自身から見て左が +X、右が -X。
@@ -15,6 +17,7 @@ const DEFAULTS = {
   hairStyle: 'short', // 'short' | 'spiky' | 'none'
   face: 'smile',      // 'smile' | 'angry'
   sleeves: 'short',   // 'short'（前腕が肌） | 'long'（手だけ肌）
+  sword: true,        // 右手に剣を持つ
   scale: 0.15,
 };
 
@@ -130,8 +133,10 @@ export function createCharacter(options = {}) {
     const w = R.armW * 0.95; // 親より少し細くして、重なった面のちらつきを防ぐ
     if (o.sleeves === 'long') hang(elbow, w, w, ov, -R.forearm, o.shirt);
     else hang(elbow, w, w, ov, -R.forearm, o.skin, 0, SKIN_GLOW);
-    hang(elbow, w, w, -R.forearm, -R.forearm - R.hand, o.skin, 0, SKIN_GLOW);
-    return { shoulder, elbow };
+    // 手首: 回転順 YXZ = 前腕のひねり(Y) → 手首の曲げ(X)
+    const wrist = joint(elbow, 0, -R.forearm, 0, 'YXZ');
+    hang(wrist, w, w, 0, -R.hand, o.skin, 0, SKIN_GLOW);
+    return { shoulder, elbow, wrist };
   };
   const lArm = makeArm(1);
   const rArm = makeArm(-1);
@@ -161,12 +166,65 @@ export function createCharacter(options = {}) {
   const joints = {
     hips, waist, neck,
     lShoulder: lArm.shoulder, lElbow: lArm.elbow,
-    rShoulder: rArm.shoulder, rElbow: rArm.elbow,
+    rShoulder: rArm.shoulder, rElbow: rArm.elbow, rWrist: rArm.wrist,
     lHip: lLeg.hip, lKnee: lLeg.knee, lAnkle: lLeg.ankle,
     rHip: rLeg.hip, rKnee: rLeg.knee, rAnkle: rLeg.ankle,
   };
 
-  const animator = new Animator({ group, joints, soles, scale: o.scale });
+  // ---- 剣（右手に握らせる）----
+  let sword = null;
+  let trail = null;
+  if (o.sword) {
+    sword = createSword();
+    sword.position.set(0, -R.hand / 2, 0);
+    joints.rWrist.add(sword);
+    trail = new SwordTrail(sword);
+  }
+
+  const animator = new Animator({ group, joints, soles, scale: o.scale, armed: !!sword });
+
+  // 被弾時などに全身を白く光らせる（0 = 通常, 1 = 真っ白）
+  const materials = [];
+  group.traverse((obj) => {
+    if (obj.isMesh && obj.material.emissive) {
+      const m = obj.material;
+      m.userData.baseEmissive = m.emissive.clone();
+      m.userData.baseIntensity = m.emissiveIntensity;
+      materials.push(m);
+    }
+  });
+  const WHITE = new THREE.Color(0xffffff);
+  const setFlash = (k) => {
+    for (const m of materials) {
+      m.emissive.copy(m.userData.baseEmissive).lerp(WHITE, k);
+      m.emissiveIntensity = m.userData.baseIntensity + (1 - m.userData.baseIntensity) * k;
+    }
+  };
+
+  // 剣を振っている間は 1 フレームを細かく刻んで姿勢を進める。
+  // 軌跡がなめらかな弧になり、速い振りでも当たり判定（onSubstep）が刃の通り道を取りこぼさない
+  let lastAttackT = 0;
+  const update = (dt, onSubstep) => {
+    if (trail && animator.trailOn && !animator.debug) {
+      const SUB = 5;
+      // 攻撃の進み具合も、前フレームの値から今フレームの値まで等分して進める
+      const t1 = animator.attackT;
+      const t0 = lastAttackT <= t1 ? lastAttackT : 0; // 次の攻撃に切り替わった直後は 0 から
+      for (let i = 0; i < SUB; i++) {
+        animator.attackT = t0 + ((t1 - t0) * (i + 1)) / SUB;
+        animator.update(dt / SUB);
+        group.updateWorldMatrix(true, true);
+        trail.sample();
+        if (onSubstep) onSubstep();
+      }
+    } else {
+      animator.update(dt);
+      if (onSubstep) onSubstep();
+    }
+    lastAttackT = animator.attackT;
+    if (trail) trail.update(dt);
+  };
+
 
   return {
     group,
@@ -174,7 +232,10 @@ export function createCharacter(options = {}) {
     animator,
     scale: o.scale,
     height: (R.hipY + R.waistUp + R.chestTop + R.head) * o.scale,
-    update: (dt) => animator.update(dt),
+    update,
+    sword,
+    trail,
+    setFlash,
     parts: { skull, face, hair },
   };
 }

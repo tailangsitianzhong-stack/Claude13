@@ -10,6 +10,14 @@ addEventListener('keydown', (e) => {
 addEventListener('keyup', (e) => down.delete(e.code));
 addEventListener('blur', () => down.clear());
 
+// マウスの左ボタンは 'Mouse0' というキーとして扱う（攻撃用）
+addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || e.target.tagName !== 'CANVAS') return;
+  pressed.add('Mouse0');
+  down.add('Mouse0');
+});
+addEventListener('pointerup', (e) => { if (e.button === 0) down.delete('Mouse0'); });
+
 export const input = {
   isDown: (...codes) => codes.some((c) => down.has(c)),
   wasPressed: (...codes) => codes.some((c) => pressed.has(c)),

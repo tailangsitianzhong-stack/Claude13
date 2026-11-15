@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RIG } from './rig.js';
-import { POSES, makePose, resetPose, lerpPose, copyPose } from './poses.js';
+import { POSES, carrySword, makePose, resetPose, lerpPose, copyPose } from './poses.js';
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const tmp = new THREE.Vector3();
@@ -13,7 +13,11 @@ const tmp = new THREE.Vector3();
  *  - 足が地面に着くように、毎フレーム靴底の位置から腰の高さを決める（めり込み・浮き防止）
  */
 export class Animator {
-  constructor({ group, joints, soles, scale }) {
+  constructor({ group, joints, soles, scale, armed = false }) {
+    this.armed = armed;      // 剣を持っているか（持ち歩き方が変わる）
+    this.attackT = 0;        // 攻撃モーションの進み具合 0 → 1
+    this.hitT = 0;           // 被弾モーションの進み具合 0 → 1
+    this.trailOn = false;    // 剣の軌跡を出している最中か
     this.group = group;
     this.joints = joints;
     this.soles = soles;
@@ -46,6 +50,7 @@ export class Animator {
   evaluate(name, out) {
     resetPose(out);
     POSES[name](this, out);
+    if (this.armed) carrySword(name, this, out);
     return out;
   }
 
@@ -53,12 +58,14 @@ export class Animator {
     this.time += dt;
     if (this.debug) {
       const d = this.debug;
-      const saved = [this.phase, this.airU, this.time];
+      const saved = [this.phase, this.airU, this.time, this.attackT, this.hitT];
       this.phase = d.phase ?? 0;
       this.airU = d.airU ?? 0;
       this.time = d.time ?? 0;
+      this.attackT = d.attackT ?? 0;
+      this.hitT = d.hitT ?? 0;
       this.evaluate(d.name, this.pose);
-      [this.phase, this.airU, this.time] = saved;
+      [this.phase, this.airU, this.time, this.attackT, this.hitT] = saved;
       this.apply(this.pose);
       return;
     }
@@ -83,6 +90,7 @@ export class Animator {
     // side: 左 = +1, 右 = -1
     this.applyLimbs(p, 'l', 1, j.lShoulder, j.lElbow, j.lHip, j.lKnee, j.lAnkle);
     this.applyLimbs(p, 'r', -1, j.rShoulder, j.rElbow, j.rHip, j.rKnee, j.rAnkle);
+    j.rWrist.rotation.set(p.swordTilt, p.swordTwist, p.swordRoll);
 
     // ---- 接地: 一番低い靴底が地面（ルートの高さ）に来るよう腰を上下させる ----
     j.hips.position.set(p.hipsX, RIG.hipY, 0);

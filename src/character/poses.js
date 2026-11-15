@@ -7,6 +7,8 @@
 //   Flat      : 1 で靴底を地面と平行に保つ（接地中）、0 でスネに従う
 //   hips/waist/neck Pitch: 前に倒す + / Yaw: 上から見て反時計回り + / Roll: 左側を上げる +
 //   ground    : 1 で足が地面に着くよう腰の高さを自動調整、0 で空中
+//   swordTilt : 剣先を腕の延長線の方へ倒す +（0 で前腕と直角、π/2 で一直線）
+//   swordTwist: 前腕をひねって刃の向きを変える
 //   lift      : 接地位置からさらに持ち上げる量（走りの滞空）
 //   hipsFree  : 空中での腰の高さの補正
 
@@ -21,6 +23,7 @@ export const FIELDS = [
   'hipsPitch', 'hipsYaw', 'hipsRoll',
   'waistPitch', 'waistYaw', 'waistRoll',
   'neckPitch', 'neckYaw', 'neckRoll',
+  'swordTilt', 'swordTwist', 'swordRoll',
   ...LIMB.map((f) => 'l' + f),
   ...LIMB.map((f) => 'r' + f),
 ];
@@ -317,4 +320,259 @@ function land(ctx, o) {
   }
 }
 
-export const POSES = { stand, fight, walk, run, crouch, air, land };
+// ============================================================
+// 剣を持っているときの右腕の上書き（攻撃以外のモーション用）
+// ============================================================
+export function carrySword(name, ctx, o) {
+  switch (name) {
+    case 'stand': // 剣先を斜め前の地面へ向けて下げる
+      o.rShoulderSwing = 0.1 + (o.rShoulderSwing - 0.03) * 0.5;
+      o.rShoulderOut += 0.1;
+      o.rShoulderTwist = 0.0;
+      o.rElbow += 0.2;
+      o.swordTilt = 1.0;
+      o.swordTwist = -0.35;
+      break;
+    case 'fight': // 右肩の前に剣を立てて構える
+      o.rShoulderSwing = 0.55;
+      o.rShoulderOut = 0.2;
+      o.rShoulderTwist = 0.25;
+      o.rElbow = 1.7 + 0.04 * sin(ctx.time * 5.2);
+      o.swordTilt = 0.75;
+      o.swordTwist = 0.25;
+      break;
+    case 'walk': // 腕の振りを抑えて、剣先は前下へ
+      o.rShoulderSwing = 0.12 + (o.rShoulderSwing - 0.04) * 0.4;
+      o.rShoulderOut = 0.14;
+      o.rShoulderTwist = 0.0;
+      o.rElbow = 0.42 + (o.rElbow - 0.3) * 0.4;
+      o.swordTilt = 0.95;
+      o.swordTwist = -0.3;
+      break;
+    case 'run': // 剣を後ろへ流して走る
+      o.rShoulderSwing = -0.7 + (o.rShoulderSwing - 0.12) * 0.22;
+      o.rShoulderOut = 0.3;
+      o.rShoulderTwist = 0.0;
+      o.rElbow = 0.22;
+      o.swordTilt = 2.2;
+      o.swordTwist = -0.25;
+      break;
+    case 'crouch':
+      o.swordTilt = 1.9;
+      break;
+    case 'air':
+      o.swordTilt = 0.9;
+      break;
+    case 'land':
+      o.swordTilt = 1.2;
+      o.swordTwist = -0.3;
+      break;
+    default:
+      break;
+  }
+}
+
+// ============================================================
+// 攻撃（3連の斬撃がループする）
+//   attack1: 右上から左下への袈裟斬り
+//   attack2: 左から右への横薙ぎ
+//   attack3: 跳び込みながらの兜割り（振り下ろし）
+// 各攻撃は「振りかぶり → 斬る瞬間 → 振り抜き → 残心」のキーポーズを
+// ctx.attackT（0→1）でつなぐ。斬る区間だけ加速させて、ためと速さの差を出す。
+// ============================================================
+const EASE = {
+  lin: (t) => t,
+  in: (t) => t * t,                      // ゆっくり → 速く（斬り始め）
+  out: (t) => 1 - (1 - t) * (1 - t),     // 速く → ゆっくり（振り抜き）
+  inout: smooth,
+};
+
+// keys: [{ t, pose(o), ease }]。ease はそのキーへ「入ってくる」区間のかかり方
+function keyed(t, keys, o) {
+  let i = 0;
+  while (i < keys.length - 2 && t > keys[i + 1].t) i++;
+  const k0 = keys[i];
+  const k1 = keys[i + 1];
+  const u = clamp01((t - k0.t) / (k1.t - k0.t));
+  resetPose(tmpA);
+  resetPose(tmpB);
+  k0.pose(tmpA);
+  k1.pose(tmpB);
+  lerpPose(o, tmpA, tmpB, EASE[k1.ease ?? 'inout'](u));
+}
+
+// --- 攻撃1: 袈裟斬り ---
+const A1 = [
+  { t: 0, pose: (o) => { // 振りかぶり: 体を右へひねり、剣を右肩の上へ
+    o.hipsYaw = -0.3; o.waistYaw = -0.6; o.neckYaw = 0.75;
+    o.waistPitch = 0.02; o.waistRoll = -0.08;
+    o.lHipSwing = 0.3; o.lKnee = 0.35; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.2; o.rKnee = 0.5; o.rHipOut = 0.14; o.rFlat = 0.7;
+    o.rShoulderSwing = 2.05; o.rShoulderOut = 0.7; o.rElbow = 1.55;
+    o.swordTilt = 0.15;
+    o.lShoulderSwing = 0.95; o.lShoulderOut = 0.1; o.lElbow = 0.85;
+  } },
+  { t: 0.3, ease: 'out', pose: (o) => { // ため: さらに沈んでひねる
+    o.hipsYaw = -0.4; o.waistYaw = -0.75; o.neckYaw = 0.95;
+    o.waistPitch = 0.0; o.waistRoll = -0.1;
+    o.lHipSwing = 0.35; o.lKnee = 0.5; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.2; o.rKnee = 0.65; o.rHipOut = 0.14; o.rFlat = 0.7;
+    o.rShoulderSwing = 2.25; o.rShoulderOut = 0.8; o.rElbow = 1.75;
+    o.swordTilt = -0.05;
+    o.lShoulderSwing = 1.1; o.lShoulderOut = 0.05; o.lElbow = 0.7;
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => { // 斬る瞬間: 右足を踏み込み、腕が伸びきる
+    o.hipsYaw = 0.1; o.waistYaw = 0.15; o.neckYaw = -0.2;
+    o.waistPitch = 0.2; o.hipsPitch = 0.05;
+    o.rHipSwing = 0.62; o.rKnee = 0.55; o.rHipOut = 0.08; o.rFlat = 1;
+    o.lHipSwing = -0.4; o.lKnee = 0.3; o.lHipOut = 0.1; o.lFlat = 0.3;
+    o.rShoulderSwing = 1.35; o.rShoulderOut = 0.0; o.rElbow = 0.25;
+    o.swordTilt = 1.1;
+    o.lShoulderSwing = -0.3; o.lShoulderOut = 0.45; o.lElbow = 0.6;
+  } },
+  { t: 0.66, ease: 'out', pose: (o) => { // 振り抜き: 剣は左腰の下へ
+    o.hipsYaw = 0.4; o.waistYaw = 0.75; o.neckYaw = -0.95;
+    o.waistPitch = 0.4; o.hipsPitch = 0.08; o.waistRoll = 0.1;
+    o.rHipSwing = 0.78; o.rKnee = 0.85; o.rHipOut = 0.08; o.rFlat = 1;
+    o.lHipSwing = -0.55; o.lKnee = 0.4; o.lHipOut = 0.1; o.lFlat = 0.25;
+    o.rShoulderSwing = 0.6; o.rShoulderOut = -0.75; o.rShoulderTwist = 0.4; o.rElbow = 0.45;
+    o.swordTilt = 0.8;
+    o.lShoulderSwing = -0.65; o.lShoulderOut = 0.6; o.lElbow = 0.5;
+  } },
+  { t: 1, ease: 'out', pose: (o) => { // 残心
+    o.hipsYaw = 0.42; o.waistYaw = 0.8; o.neckYaw = -1.0;
+    o.waistPitch = 0.34; o.hipsPitch = 0.06; o.waistRoll = 0.08;
+    o.rHipSwing = 0.72; o.rKnee = 0.75; o.rHipOut = 0.08; o.rFlat = 1;
+    o.lHipSwing = -0.5; o.lKnee = 0.4; o.lHipOut = 0.1; o.lFlat = 0.3;
+    o.rShoulderSwing = 0.6; o.rShoulderOut = -0.8; o.rShoulderTwist = 0.45; o.rElbow = 0.6;
+    o.swordTilt = 0.8;
+    o.lShoulderSwing = -0.55; o.lShoulderOut = 0.55; o.lElbow = 0.55;
+  } },
+];
+
+// --- 攻撃2: 横薙ぎ（左 → 右）---
+const A2 = [
+  { t: 0, pose: (o) => { // 振りかぶり: 体を左へひねり、剣を左脇へ引きつける
+    o.hipsYaw = 0.42; o.waistYaw = 0.85; o.neckYaw = -1.05;
+    o.waistPitch = 0.28; o.hipsPitch = 0.05;
+    o.rHipSwing = 0.65; o.rKnee = 0.75; o.rHipOut = 0.08; o.rFlat = 1;
+    o.lHipSwing = -0.45; o.lKnee = 0.4; o.lHipOut = 0.1; o.lFlat = 0.35;
+    o.rShoulderSwing = 1.15; o.rShoulderOut = -0.95; o.rShoulderTwist = 0.5; o.rElbow = 1.3;
+    o.swordTilt = 0.9; o.swordTwist = 1.4;
+    o.lShoulderSwing = 0.2; o.lShoulderOut = 0.5; o.lElbow = 0.8;
+  } },
+  { t: 0.28, ease: 'out', pose: (o) => {
+    o.hipsYaw = 0.5; o.waistYaw = 0.98; o.neckYaw = -1.2;
+    o.waistPitch = 0.3; o.hipsPitch = 0.05;
+    o.rHipSwing = 0.6; o.rKnee = 0.85; o.rHipOut = 0.08; o.rFlat = 1;
+    o.lHipSwing = -0.4; o.lKnee = 0.5; o.lHipOut = 0.1; o.lFlat = 0.35;
+    o.rShoulderSwing = 1.2; o.rShoulderOut = -1.05; o.rShoulderTwist = 0.5; o.rElbow = 1.5;
+    o.swordTilt = 0.8; o.swordTwist = 1.4;
+    o.lShoulderSwing = 0.35; o.lShoulderOut = 0.4; o.lElbow = 0.9;
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => { // 斬る瞬間: 腕を水平に伸ばして正面を通過
+    o.hipsYaw = 0.0; o.waistYaw = -0.05; o.neckYaw = 0.05;
+    o.waistPitch = 0.16;
+    o.lHipSwing = 0.45; o.lKnee = 0.5; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.1; o.rKnee = 0.4; o.rHipOut = 0.12; o.rFlat = 0.8;
+    o.rShoulderSwing = 1.45; o.rShoulderOut = 0.05; o.rElbow = 0.2;
+    o.swordTilt = 1.35; o.swordTwist = 1.45;
+    o.lShoulderSwing = -0.25; o.lShoulderOut = 0.7; o.lElbow = 0.6;
+  } },
+  { t: 0.66, ease: 'out', pose: (o) => { // 振り抜き: 剣は右の外へ、左手は後ろへ引く
+    o.hipsYaw = -0.45; o.waistYaw = -0.85; o.neckYaw = 1.05;
+    o.waistPitch = 0.12; o.waistRoll = -0.08;
+    o.lHipSwing = 0.62; o.lKnee = 0.7; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.4; o.rKnee = 0.4; o.rHipOut = 0.14; o.rFlat = 0.35;
+    o.rShoulderSwing = 1.4; o.rShoulderOut = 1.2; o.rElbow = 0.15;
+    o.swordTilt = 1.4; o.swordTwist = 1.5;
+    o.lShoulderSwing = -0.75; o.lShoulderOut = 0.35; o.lElbow = 0.95;
+  } },
+  { t: 1, ease: 'out', pose: (o) => {
+    o.hipsYaw = -0.5; o.waistYaw = -0.9; o.neckYaw = 1.15;
+    o.waistPitch = 0.1; o.waistRoll = -0.06;
+    o.lHipSwing = 0.58; o.lKnee = 0.62; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.36; o.rKnee = 0.4; o.rHipOut = 0.14; o.rFlat = 0.4;
+    o.rShoulderSwing = 1.3; o.rShoulderOut = 1.3; o.rElbow = 0.3;
+    o.swordTilt = 1.3; o.swordTwist = 1.5;
+    o.lShoulderSwing = -0.65; o.lShoulderOut = 0.35; o.lElbow = 0.9;
+  } },
+];
+
+// --- 攻撃3: 跳び込み兜割り ---
+const A3 = [
+  { t: 0, pose: (o) => { // 沈み込みながら剣を頭上へ回す
+    o.hipsYaw = -0.2; o.waistYaw = -0.35; o.neckYaw = 0.5;
+    o.waistPitch = 0.1; o.hipsPitch = 0.1;
+    o.lHipSwing = 0.7; o.lKnee = 0.95; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = 0.35; o.rKnee = 0.95; o.rHipOut = 0.12; o.rFlat = 0.8;
+    o.rShoulderSwing = 1.9; o.rShoulderOut = 0.75; o.rElbow = 0.9;
+    o.swordTilt = 0.7; o.swordTwist = 0.6;
+    o.lShoulderSwing = 0.9; o.lShoulderOut = 0.3; o.lElbow = 0.8;
+  } },
+  { t: 0.24, ease: 'out', pose: (o) => { // 踏み切り直前: 両手で剣を背中側まで振りかぶる
+    o.waistPitch = -0.12; o.hipsPitch = 0.12; o.neckPitch = 0.1;
+    o.lHipSwing = 0.85; o.lKnee = 1.2; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = 0.75; o.rKnee = 1.25; o.rHipOut = 0.1; o.rFlat = 1;
+    o.rShoulderSwing = 2.65; o.rShoulderOut = 0.3; o.rShoulderTwist = 0.2; o.rElbow = 1.35;
+    o.swordTilt = -0.1;
+    o.lShoulderSwing = 2.5; o.lShoulderOut = 0.05; o.lShoulderTwist = 0.5; o.lElbow = 1.35;
+  } },
+  { t: 0.44, ease: 'out', pose: (o) => { // 空中の頂点: 体を反らせ、膝を畳む
+    o.lift = 1.15;
+    o.waistPitch = -0.28; o.hipsPitch = -0.05; o.neckPitch = 0.15;
+    o.lHipSwing = 0.9; o.lKnee = 1.5; o.lHipOut = 0.08; o.lAnkle = -0.3;
+    o.rHipSwing = 0.2; o.rKnee = 1.55; o.rHipOut = 0.1; o.rAnkle = -0.3;
+    o.rShoulderSwing = 2.85; o.rShoulderOut = 0.25; o.rShoulderTwist = 0.2; o.rElbow = 1.1;
+    o.swordTilt = -0.25;
+    o.lShoulderSwing = 2.7; o.lShoulderOut = 0.0; o.lShoulderTwist = 0.5; o.lElbow = 1.1;
+  } },
+  { t: 0.58, ease: 'in', pose: (o) => { // 斬る瞬間: 落下しながら真下へ振り下ろす
+    o.lift = 0.45;
+    o.waistPitch = 0.32; o.hipsPitch = 0.1; o.neckPitch = -0.2;
+    o.rHipSwing = 0.75; o.rKnee = 0.5; o.rHipOut = 0.08; o.rAnkle = 0.1;
+    o.lHipSwing = -0.1; o.lKnee = 0.9; o.lHipOut = 0.1; o.lAnkle = -0.3;
+    o.rShoulderSwing = 1.4; o.rShoulderOut = 0.0; o.rShoulderTwist = 0.25; o.rElbow = 0.25;
+    o.swordTilt = 1.15;
+    o.lShoulderSwing = 1.3; o.lShoulderOut = -0.15; o.lShoulderTwist = 0.6; o.lElbow = 0.45;
+  } },
+  { t: 0.7, ease: 'out', pose: (o) => { // 着地: 深く沈み、剣先は地面すれすれ
+    o.waistPitch = 0.62; o.hipsPitch = 0.16; o.neckPitch = -0.45;
+    o.rHipSwing = 1.0; o.rKnee = 1.15; o.rHipOut = 0.08; o.rFlat = 1;
+    o.lHipSwing = -0.45; o.lKnee = 0.75; o.lHipOut = 0.12; o.lFlat = 0.25;
+    o.rShoulderSwing = 1.4; o.rShoulderOut = 0.0; o.rShoulderTwist = 0.25; o.rElbow = 0.3;
+    o.swordTilt = 1.12;
+    o.lShoulderSwing = 1.3; o.lShoulderOut = -0.12; o.lShoulderTwist = 0.6; o.lElbow = 0.5;
+  } },
+  { t: 1, ease: 'out', pose: (o) => { // 残心: 少しだけ体を起こす
+    o.waistPitch = 0.5; o.hipsPitch = 0.12; o.neckPitch = -0.38;
+    o.rHipSwing = 0.9; o.rKnee = 1.0; o.rHipOut = 0.08; o.rFlat = 1;
+    o.lHipSwing = -0.42; o.lKnee = 0.65; o.lHipOut = 0.12; o.lFlat = 0.3;
+    o.rShoulderSwing = 1.3; o.rShoulderOut = 0.05; o.rShoulderTwist = 0.2; o.rElbow = 0.4;
+    o.swordTilt = 1.3;
+    o.lShoulderSwing = 0.9; o.lShoulderOut = 0.15; o.lElbow = 0.6;
+  } },
+];
+
+const attack1 = (ctx, o) => keyed(ctx.attackT, A1, o);
+const attack2 = (ctx, o) => keyed(ctx.attackT, A2, o);
+const attack3 = (ctx, o) => keyed(ctx.attackT, A3, o);
+
+// ============================================================
+// 被弾: のけぞって（hitT 0 → 0.25）、持ち直す（→ 1）
+// ============================================================
+function hit(ctx, o) {
+  const t = ctx.hitT;
+  const k = t < 0.25 ? EASE.out(t / 0.25) : 1 - smooth((t - 0.25) / 0.75) * 0.75;
+  o.hipsPitch = -0.12 * k;
+  o.waistPitch = -0.5 * k;
+  o.neckPitch = -0.45 * k;
+  o.waistYaw = 0.25 * k;
+  o.lHipSwing = -0.45 * k; o.lKnee = 0.3 + 0.2 * k; o.lHipOut = 0.12; o.lFlat = 1;
+  o.rHipSwing = 0.3 * k; o.rKnee = 0.25 + 0.35 * k; o.rHipOut = 0.14; o.rFlat = 1;
+  o.lShoulderSwing = 0.3 + 0.5 * k; o.lShoulderOut = 0.3 + 0.9 * k; o.lElbow = 0.9;
+  o.rShoulderSwing = 0.3 - 0.5 * k; o.rShoulderOut = 0.3 + 0.7 * k; o.rElbow = 0.8;
+  o.swordTilt = 0.8;
+}
+
+export const POSES = { stand, fight, walk, run, crouch, air, land, attack1, attack2, attack3, hit };
