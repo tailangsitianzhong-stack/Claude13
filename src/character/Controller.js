@@ -28,11 +28,14 @@ export const ATTACKS = [
   { anim: 'attack3', duration: 0.68, active: [0.5, 0.71], chain: 0.86, lunge: [0.24, 0.58, 14], power: 2 },
 ];
 export const IDEAL_RANGE = 4.9; // 踏み込みで詰める間合い（リグ単位）。これより近づかない
-// 空中攻撃（叩きつけ）。ジャンプ中に攻撃を押すと、一瞬ためてから真下へ急降下し、着地点のまわりを攻撃する
+// 空中攻撃（叩きつけ）。ジャンプ中に攻撃を押すと、前方斜め下へ一瞬で突っ込み、着地点のまわりを攻撃する
 export const AIR_SLAM = {
   minHeight: 0.8,   // これより低いと出せない（リグ単位）
-  windup: 0.16,     // 空中で振りかぶる時間（秒）。この間はほぼ落ちない
-  diveSpeed: 34,    // 急降下の速さ（リグ単位/秒）
+  windup: 0.05,     // 振りかぶる時間（秒）。ほぼ一瞬
+  diveSpeed: 75,    // 落ちる速さ（リグ単位/秒）。一瞬で地面に届く
+  forward: 6.5,     // 相手がいないとき、前方へ突っ込む距離（リグ単位）
+  maxForward: 13,   // 相手へ向かって突っ込める最大距離
+  stopShort: 3.2,   // 相手の手前これだけの位置に着地する
   radius: 7,        // 着地時の攻撃範囲の半径（リグ単位）
   reach: 2.2,       // 範囲の中心はキャラの前方これだけ先（剣が地面を叩く位置）
 };
@@ -58,6 +61,8 @@ export class CharacterController {
     this.jumpBuffer = 0;
     this.prevAttack = false;  // 前フレームに攻撃が押されていたか（押した瞬間の検出用）
     this.slamT = 0;
+    this.slamVx = 0;
+    this.slamVz = 0;
 
     this.target = null;       // 攻撃時に自動で向く相手（Character）
     this.attackIndex = 0;     // 今出している攻撃の番号
@@ -148,9 +153,11 @@ export class CharacterController {
       tz = Math.cos(group.rotation.y) * v;
       rate = 160 * S * dt;
     } else if (this.state === 'airSlam') {
-      tx = 0;
-      tz = 0;
-      rate = 40 * S * dt; // 横の勢いを殺して、ほぼ真下へ落ちる
+      // 振りかぶりの一瞬は止まり、そのあと前方斜め下へ一気に突っ込む
+      const diving = this.slamT >= AIR_SLAM.windup;
+      tx = diving ? this.slamVx : 0;
+      tz = diving ? this.slamVz : 0;
+      rate = 1e6;
     } else if (this.state === 'hit') {
       tx = 0;
       tz = 0;
@@ -227,12 +234,23 @@ export class CharacterController {
           // 空中攻撃: 近くに相手がいればそちらを向き、剣を振りかぶる
           this.state = 'airSlam';
           this.slamT = 0;
-          this.vy = Math.max(this.vy * 0.3, 3 * S);
+          this.vy = 0;
+          // 向き: 入力があればその方向。近くに相手がいればそちらを優先し、その手前に着地する
+          if (moving) group.rotation.y = Math.atan2(cmd.x, cmd.z);
+          let forwardDist = AIR_SLAM.forward * S;
           if (this.target) {
             const dx = this.target.group.position.x - group.position.x;
             const dz = this.target.group.position.z - group.position.z;
-            if (Math.hypot(dx, dz) < AIM_ASSIST.range * S) group.rotation.y = Math.atan2(dx, dz);
+            const d = Math.hypot(dx, dz);
+            if (d < (AIR_SLAM.maxForward + AIR_SLAM.stopShort) * S) {
+              group.rotation.y = Math.atan2(dx, dz);
+              forwardDist = Math.max(0, d - AIR_SLAM.stopShort * S);
+            }
           }
+          // 地面に届くまでの時間で、ちょうど forwardDist 進む速さ
+          const fall = Math.max(0.05, group.position.y / (AIR_SLAM.diveSpeed * S));
+          this.slamVx = (Math.sin(group.rotation.y) * forwardDist) / fall;
+          this.slamVz = (Math.cos(group.rotation.y) * forwardDist) / fall;
           animator.attackT = 0;
           animator.play('airSlam', 0.06);
           this.events.push({ type: 'airSlamStart', index: 2 });
@@ -247,13 +265,9 @@ export class CharacterController {
       }
       case 'airSlam': {
         this.slamT += dt;
-        if (this.slamT < AIR_SLAM.windup) {
-          this.vy -= MOVE.gravity * 0.2 * S * dt; // ためている間はふわっと浮く
-        } else {
-          this.vy = -AIR_SLAM.diveSpeed * S;      // 一気に急降下
-        }
+        this.vy = this.slamT < AIR_SLAM.windup ? 0 : -AIR_SLAM.diveSpeed * S; // 一瞬止まってから、一気に落ちる
         group.position.y += this.vy * dt;
-        animator.attackT = Math.min(1, this.slamT / (AIR_SLAM.windup + 0.06));
+        animator.attackT = Math.min(1, this.slamT / (AIR_SLAM.windup + 0.04));
         animator.trailOn = this.slamT >= AIR_SLAM.windup;
         if (group.position.y <= 0) {
           group.position.y = 0;

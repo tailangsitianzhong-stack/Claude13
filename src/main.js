@@ -8,6 +8,7 @@ import { CameraFx } from './camera/CameraFx.js';
 import { ThirdPersonCamera } from './camera/ThirdPersonCamera.js';
 import { Sparks } from './effects/Sparks.js';
 import { Impact } from './effects/Impact.js';
+import { GroundBreak } from './effects/GroundBreak.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -63,6 +64,7 @@ const fx = new CameraFx(camera, () => view.currentDistance);
 const controls = { target: new THREE.Vector3() };
 const sparks = new Sparks(scene);
 const impact = new Impact(scene);
+const groundBreak = new GroundBreak(scene, stage.config.colors);
 let hitStop = 0;   // ヒットストップの残り秒数（命中の瞬間、時間をほぼ止める）
 let flash = 0;     // P2 を白く光らせる残り秒数
 
@@ -116,8 +118,8 @@ function toCameraSpace(character, [x, y, z]) {
 function onAttackEvent(e) {
   const d = toCameraSpace(p1, SLASH_DIR[e.index]);
   if (e.type === 'airSlamStart') {
-    fx.zoom(70);           // 空中でためる間、少し引く
-    fx.kick(0, 0.6, 0);
+    fx.zoom(90);           // 突っ込む勢いで視野が広がる
+    fx.kick(0, 0.3, 0.8);
   } else if (e.type === 'airSlamLand') {
     airSlamImpact();
   } else if (e.type === 'attackStart' && e.index === 2) {
@@ -153,7 +155,9 @@ function airSlamImpact() {
   const cz = p1.group.position.z + Math.cos(h) * AIR_SLAM.reach * S;
   const radius = AIR_SLAM.radius * S;
 
-  // 地面: 範囲いっぱいに広がる衝撃波の輪を重ね、土煙と光の粒を巻き上げる
+  // 地面: へこみとひび、まわりの地面がめくれ上がる隆起
+  groundBreak.trigger(cx, cz, radius * 0.8);
+  // 範囲いっぱいに広がる衝撃波の輪を重ね、土煙と光の粒を巻き上げる
   v1.set(cx, 0.03, cz);
   impact.ring(v1, radius, 0.5);
   impact.ring(v1, radius * 0.65, 0.38);
@@ -161,6 +165,7 @@ function airSlamImpact() {
   impact.flash(v1.setY(p1.height * 0.25), p1.height * 2.4, 0.18);
   forward.set(0, 0, 0);
   sparks.burst(v1, forward, 20, p1.height * 0.075, p1.height * 2.2, 0.25, 0.25);
+  sparks.burst(v1, forward, 14, p1.height * 0.09, p1.height * 2.8, 0.07, 0.45); // 土くれ
   sparks.burst(v1, forward, 12, p1.height * 0.05, p1.height * 3.4, 0.53, 0.9);
   fx.shake(0.6);
   fx.kick(0, -1.1, 0);
@@ -299,6 +304,7 @@ function step(realDt) {
   p2.update(dt);
   sparks.update(dt);
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
+  groundBreak.update(realDt);
   flash = Math.max(0, flash - realDt);
   p2.setFlash(flash > 0 ? 1 : 0);
 
