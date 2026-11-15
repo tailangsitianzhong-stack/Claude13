@@ -1,41 +1,53 @@
 import * as THREE from 'three';
 import { faceTexture } from './face.js';
+import { Animator } from './Animator.js';
+import { RIG } from './rig.js';
 
 // ロブロックス風の低コストキャラ。全部ただの箱＋顔デカール1枚。
-// 寸法（scale=1 のとき）: 身長 5 = 脚2 + 胴2 + 頭1
+// キャラは +Z を向く。キャラ自身から見て左が +X、右が -X。
+
 const DEFAULTS = {
-  skin: 0xf5cd30,
+  skin: 0xf4f4f4,
   shirt: 0x1e88e5,
   pants: 0x2e3a4b,
   shoes: 0x222222,
   hair: 0x4a2c17,
   hairStyle: 'short', // 'short' | 'spiky' | 'none'
   face: 'smile',      // 'smile' | 'angry'
+  sleeves: 'short',   // 'short'（前腕が肌） | 'long'（手だけ肌）
   scale: 0.15,
 };
 
-function box(w, h, d, color) {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(w, h, d),
-    new THREE.MeshStandardMaterial({ color, roughness: 0.6 }),
-  );
+const SKIN_GLOW = 0.3;
+
+function box(w, h, d, color, glow = 0) {
+  const material = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  if (glow > 0) {
+    // 白い肌が影側でグレーに沈まないよう、少しだけ自分で光らせる
+    material.emissive = new THREE.Color(color);
+    material.emissiveIntensity = glow;
+  }
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+  // 影は落とすが受けない: キャラが小さく、影の解像度では体の表面にノイズが出るため
   mesh.castShadow = true;
-  mesh.receiveShadow = true;
   return mesh;
 }
 
-// 関節: pivot（回転の中心）を親にして、箱をその下にぶら下げる。
-// 先端（手・靴）は別色の箱として重ならないように継ぎ足す（Zファイティング防止）。
-function limb(w, h, d, color, tipColor, tipRatio) {
-  const pivot = new THREE.Group();
-  const tipH = h * tipRatio;
-  const mainH = h - tipH;
-  const main = box(w, mainH, d, color);
-  main.position.y = -mainH / 2;
-  const tip = box(w, tipH, d, tipColor);
-  tip.position.y = -mainH - tipH / 2;
-  pivot.add(main, tip);
-  return pivot;
+// 関節 = 回転の中心になる空のグループ
+function joint(parent, x, y, z, order = 'XYZ') {
+  const j = new THREE.Group();
+  j.position.set(x, y, z);
+  j.rotation.order = order;
+  parent.add(j);
+  return j;
+}
+
+// 上端 yTop から下端 yBottom までの箱を関節にぶら下げる
+function hang(parentJoint, w, d, yTop, yBottom, color, z = 0, glow = 0) {
+  const b = box(w, yTop - yBottom, d, color, glow);
+  b.position.set(0, (yTop + yBottom) / 2, z);
+  parentJoint.add(b);
+  return b;
 }
 
 function buildHair(style, color) {
@@ -47,12 +59,12 @@ function buildHair(style, color) {
     b.rotation.set(rx, 0, rz);
     hair.add(b);
   };
-  // 頭(1.2立方)の上にかぶせる。頭の中心が原点。
+  // 1.2 立方の頭を基準にした配置（頭の中心が原点）。実際の頭サイズへは group を縮尺して合わせる。
   if (style === 'short') {
-    add(1.32, 0.35, 1.32, 0, 0.62, 0);          // てっぺん
-    add(1.32, 1.0, 0.25, 0, 0.15, -0.55);       // 後ろ髪
-    add(0.22, 0.75, 1.2, -0.6, 0.28, -0.05);    // 横髪 左
-    add(0.22, 0.75, 1.2, 0.6, 0.28, -0.05);     // 横髪 右
+    add(1.32, 0.35, 1.32, 0, 0.62, 0);                // てっぺん
+    add(1.32, 1.0, 0.25, 0, 0.15, -0.55);             // 後ろ髪
+    add(0.22, 0.75, 1.2, -0.6, 0.28, -0.05);          // 横髪
+    add(0.22, 0.75, 1.2, 0.6, 0.28, -0.05);
     add(0.9, 0.22, 0.2, -0.15, 0.42, 0.58, 0, -0.15); // 前髪
   } else if (style === 'spiky') {
     add(1.3, 0.3, 1.3, 0, 0.62, 0);
@@ -64,71 +76,105 @@ function buildHair(style, color) {
 }
 
 /**
- * キャラを作る。返り値:
+ * キャラを作る。
+ * 関節の親子関係:
+ *   group ─ hips(骨盤) ┬ waist(腰) ┬ neck(首) ─ 頭
+ *                      │           ├ lShoulder(肩) ─ lElbow(肘)
+ *                      │           └ rShoulder     ─ rElbow
+ *                      ├ lHip(股) ─ lKnee(膝) ─ lAnkle(足首)
+ *                      └ rHip     ─ rKnee     ─ rAnkle
+ *
+ * 返り値:
  *  - group: シーンに追加するルート（足元が y=0）
- *  - joints: { head, leftArm, rightArm, leftLeg, rightLeg } 関節（rotation.x で振る）
- *  - update(t): 待機モーション
+ *  - joints: 上記の関節（Three.js の Group）
+ *  - animator: ポーズ再生（animator.play('walk') など）
+ *  - update(dt): 毎フレーム呼ぶ
  */
 export function createCharacter(options = {}) {
   const o = { ...DEFAULTS, ...options };
+  const R = RIG;
+  const ov = R.jointOverlap;
   const group = new THREE.Group();
   group.name = o.name ?? 'Character';
-  const body = new THREE.Group(); // 待機の上下ゆれ用
-  group.add(body);
   group.scale.setScalar(o.scale);
 
-  // 脚（股関節が y=2）
-  const leftLeg = limb(0.98, 2, 1, o.pants, o.shoes, 0.18);
-  leftLeg.position.set(-0.5, 2, 0);
-  const rightLeg = limb(0.98, 2, 1, o.pants, o.shoes, 0.18);
-  rightLeg.position.set(0.5, 2, 0);
+  // ---- 骨盤 ----
+  const hips = joint(group, 0, R.hipY, 0, 'YXZ');
+  hang(hips, R.pelvis[0], R.pelvis[2], R.pelvis[1] - 0.1, -0.1, o.pants);
 
-  // 胴
-  const torso = box(2, 2, 1, o.shirt);
-  torso.position.y = 3;
+  // ---- 胸 ----
+  const waist = joint(hips, 0, R.waistUp, 0, 'YXZ');
+  hang(waist, R.chest[0], R.chest[2], R.chestTop, R.chestTop - R.chest[1], o.shirt);
 
-  // 腕（肩関節が y=3.9）。手の部分だけ肌色
-  const makeArm = (side) => {
-    const arm = limb(1, 2, 1, o.shirt, o.skin, 0.25);
-    arm.position.set(side * 1.5, 3.9, 0);
-    return arm;
-  };
-  const leftArm = makeArm(-1);
-  const rightArm = makeArm(1);
-
-  // 頭（首の付け根が y=4）
-  const head = new THREE.Group();
-  head.position.y = 4;
-  const skull = box(1.2, 1.2, 1.2, o.skin);
-  skull.position.y = 0.6;
-  head.add(skull);
-
+  // ---- 頭 ----
+  const neck = joint(waist, 0, R.chestTop, 0, 'YXZ');
+  const skull = hang(neck, R.head, R.head, R.head, 0, o.skin, 0, SKIN_GLOW);
   const face = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.1, 1.1),
+    new THREE.PlaneGeometry(R.head * 0.92, R.head * 0.92),
     new THREE.MeshStandardMaterial({ map: faceTexture(o.face), transparent: true, roughness: 0.6 }),
   );
-  face.position.set(0, 0.6, 0.601); // 頭の正面に貼り付け
-  head.add(face);
-
+  face.position.set(0, R.head / 2, R.head / 2 + 0.002); // 頭の正面に貼り付け
+  neck.add(face);
   const hair = buildHair(o.hairStyle, o.hair);
-  hair.position.y = 0.6;
-  head.add(hair);
+  hair.position.y = R.head / 2;
+  hair.scale.setScalar(R.head / 1.2);
+  neck.add(hair);
 
-  body.add(leftLeg, rightLeg, torso, leftArm, rightArm, head);
+  // ---- 腕（肩 → 肘）----
+  const makeArm = (side) => {
+    const x = side * (R.chest[0] / 2 + R.armW / 2 + 0.04);
+    // 回転順 XZY: 腕のねじり(Y) → 開き(Z) → 前後の振り(X)
+    const shoulder = joint(waist, x, R.chestTop - R.shoulderDrop, 0, 'XZY');
+    hang(shoulder, R.armW, R.armW, R.shoulderDrop, R.shoulderDrop - R.upperArm, o.shirt);
+    const elbow = joint(shoulder, 0, R.shoulderDrop - R.upperArm, 0);
+    const w = R.armW * 0.95; // 親より少し細くして、重なった面のちらつきを防ぐ
+    if (o.sleeves === 'long') hang(elbow, w, w, ov, -R.forearm, o.shirt);
+    else hang(elbow, w, w, ov, -R.forearm, o.skin, 0, SKIN_GLOW);
+    hang(elbow, w, w, -R.forearm, -R.forearm - R.hand, o.skin, 0, SKIN_GLOW);
+    return { shoulder, elbow };
+  };
+  const lArm = makeArm(1);
+  const rArm = makeArm(-1);
 
-  const joints = { head, leftArm, rightArm, leftLeg, rightLeg };
-  const phase = Math.random() * Math.PI * 2;
+  // ---- 脚（股 → 膝 → 足首）----
+  const soles = []; // 接地判定に使う靴底の四隅
+  const makeLeg = (side) => {
+    const hip = joint(hips, side * R.legX, 0, 0, 'XZY');
+    hang(hip, R.legW, R.legD, ov, -R.thigh, o.pants);
+    const knee = joint(hip, 0, -R.thigh, 0);
+    hang(knee, R.legW * 0.96, R.legD * 0.96, ov, -R.shin, o.pants);
+    const ankle = joint(knee, 0, -R.shin, 0);
+    hang(ankle, R.legW, R.footD, 0.08, -R.footH, o.shoes, R.footZ);
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        soles.push({
+          ankle,
+          point: new THREE.Vector3((sx * R.legW) / 2, -R.footH, R.footZ + (sz * R.footD) / 2),
+        });
+      }
+    }
+    return { hip, knee, ankle };
+  };
+  const lLeg = makeLeg(1);
+  const rLeg = makeLeg(-1);
 
-  function update(t) {
-    // 待機モーション: 呼吸っぽく上下 + 腕を少し揺らす（ファイティングポーズ）
-    const s = Math.sin(t * 3 + phase);
-    body.position.y = s * 0.04;
-    leftArm.rotation.x = -0.9 + s * 0.08;
-    rightArm.rotation.x = -0.6 - s * 0.08;
-    leftArm.rotation.z = -0.15;
-    rightArm.rotation.z = 0.15;
-    head.rotation.x = s * 0.03;
-  }
+  const joints = {
+    hips, waist, neck,
+    lShoulder: lArm.shoulder, lElbow: lArm.elbow,
+    rShoulder: rArm.shoulder, rElbow: rArm.elbow,
+    lHip: lLeg.hip, lKnee: lLeg.knee, lAnkle: lLeg.ankle,
+    rHip: rLeg.hip, rKnee: rLeg.knee, rAnkle: rLeg.ankle,
+  };
 
-  return { group, joints, update, height: 5.2 * o.scale };
+  const animator = new Animator({ group, joints, soles, scale: o.scale });
+
+  return {
+    group,
+    joints,
+    animator,
+    scale: o.scale,
+    height: (R.hipY + R.waistUp + R.chestTop + R.head) * o.scale,
+    update: (dt) => animator.update(dt),
+    parts: { skull, face, hair },
+  };
 }
