@@ -61,8 +61,11 @@ export class CharacterController {
     if (this.bounds) {
       const r = 0.5 * S * RIG.chest[0];
       const b = this.bounds;
-      group.position.x = Math.min(b.maxX - r, Math.max(b.minX + r, group.position.x));
-      group.position.z = Math.min(b.maxZ - r, Math.max(b.minZ + r, group.position.z));
+      // 壁に当たったら、その向きの速度を消す（壁際で走り続けない）
+      const cx = Math.min(b.maxX - r, Math.max(b.minX + r, group.position.x));
+      const cz = Math.min(b.maxZ - r, Math.max(b.minZ + r, group.position.z));
+      if (cx !== group.position.x) { group.position.x = cx; this.vx = 0; }
+      if (cz !== group.position.z) { group.position.z = cz; this.vz = 0; }
     }
 
     // 進む向きへなめらかに振り向く
