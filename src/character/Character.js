@@ -11,7 +11,7 @@ const DEFAULTS = {
   hair: 0x4a2c17,
   hairStyle: 'short', // 'short' | 'spiky' | 'none'
   face: 'smile',      // 'smile' | 'angry'
-  scale: 1.5,
+  scale: 0.15,
 };
 
 function box(w, h, d, color) {
