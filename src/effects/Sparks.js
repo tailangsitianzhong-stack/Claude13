@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 
-const COUNT = 36;
+const COUNT = 80;
 const GRAVITY = 9;
 
 // 命中時に飛び散る小さな四角い火花（使い回しのプール）
@@ -18,7 +18,8 @@ export class Sparks {
   }
 
   // pos から dir の方向を中心に count 個飛ばす
-  burst(pos, dir, count, size, speed) {
+  // hue を省くと金色の火花。lightness を上げると白い破片や土煙になる
+  burst(pos, dir, count, size, speed, hue = null, sat = 1) {
     for (let i = 0; i < count; i++) {
       const it = this.items[this.next];
       this.next = (this.next + 1) % COUNT;
@@ -30,7 +31,7 @@ export class Sparks {
       ).multiplyScalar(speed * (0.5 + Math.random()));
       it.max = it.life = 0.22 + Math.random() * 0.2;
       it.size = size * (0.6 + Math.random() * 0.8);
-      it.mesh.material.color.setHSL(0.11 + Math.random() * 0.05, 1, 0.6 + Math.random() * 0.35);
+      it.mesh.material.color.setHSL(hue ?? 0.11 + Math.random() * 0.05, sat, 0.6 + Math.random() * 0.35);
       it.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
       it.mesh.visible = true;
     }

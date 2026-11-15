@@ -7,6 +7,7 @@ import { TouchControls } from './ui/TouchControls.js';
 import { CameraFx } from './camera/CameraFx.js';
 import { ThirdPersonCamera } from './camera/ThirdPersonCamera.js';
 import { Sparks } from './effects/Sparks.js';
+import { Impact } from './effects/Impact.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -61,6 +62,7 @@ const fx = new CameraFx(camera, () => view.currentDistance);
 // 確認用: game.follow = false にすると追従を止め、camera.position と controls.target で自由に置ける
 const controls = { target: new THREE.Vector3() };
 const sparks = new Sparks(scene);
+const impact = new Impact(scene);
 let hitStop = 0;   // ヒットストップの残り秒数（命中の瞬間、時間をほぼ止める）
 let flash = 0;     // P2 を白く光らせる残り秒数
 
@@ -100,6 +102,10 @@ const SLASH_DIR = [
   [0.0, -1.0, 0.35], // 兜割り: 真下へ
 ];
 
+// 斬撃波の弧の傾き（0 = 水平。袈裟斬りは斜め、兜割りは縦）
+const WAVE_TILT = [-0.75, 0.08, Math.PI / 2];
+const slashWorld = new THREE.Vector3();
+
 // キャラ基準の向きを、カメラから見た向き（右, 上, 手前）に直す
 function toCameraSpace(character, [x, y, z]) {
   v1.set(x, y, z).applyAxisAngle(THREE.Object3D.DEFAULT_UP, character.group.rotation.y);
@@ -117,9 +123,20 @@ function onAttackEvent(e) {
     fx.kick(d.x * 0.9, d.y * 0.9, 0);     // 斬る方向へカメラを振る
     fx.roll(-d.x * (strong ? 0.6 : 1.5)); // 斬撃に合わせて画面を傾ける
     fx.zoom(strong ? 30 : 55);            // 振りの勢いで視野が一瞬広がる
+    // 斬撃波: 振った向きの三日月が前へ飛ぶ（見た目だけ。当たり判定は剣とオーラ）
+    const h = p1.group.rotation.y;
+    v1.set(p1.group.position.x + Math.sin(h) * 0.25, p1.height * (strong ? 0.75 : 0.62), p1.group.position.z + Math.cos(h) * 0.25);
+    impact.wave(v1, h, WAVE_TILT[e.index], p1.height * (strong ? 1.15 : 0.95), p1.height * (strong ? 6 : 7.5));
   } else if (e.type === 'slam') {
     fx.shake(0.32);                       // 着地の衝撃
     fx.kick(0, -0.7, 0);
+    // 叩きつけた地点に衝撃波の輪と土煙
+    const h = p1.group.rotation.y;
+    v1.set(p1.group.position.x + Math.sin(h) * p1.height * 0.9, 0.03, p1.group.position.z + Math.cos(h) * p1.height * 0.9);
+    impact.ring(v1, p1.height * 1.5, 0.45);
+    impact.ring(v1, p1.height * 0.9, 0.3);
+    forward.set(0, 0, 0);
+    sparks.burst(v1, forward, 14, p1.height * 0.07, p1.height * 1.6, 0.25, 0.25);
   }
 }
 
@@ -174,7 +191,14 @@ function checkHit() {
 
   v1.set(p2.group.position.x - (dx / dist) * 0.05, p2.height * 0.6, p2.group.position.z - (dz / dist) * 0.05);
   forward.set(dx / dist, 0, dz / dist);
-  sparks.burst(v1, forward, strong ? 18 : 10, p2.height * (strong ? 0.07 : 0.055), p2.height * 3.2);
+  sparks.burst(v1, forward, strong ? 22 : 12, p2.height * (strong ? 0.07 : 0.055), p2.height * 3.2);
+  sparks.burst(v1, forward, strong ? 10 : 6, p2.height * 0.05, p2.height * 4.2, 0.53, 0.9); // 水色の光の粒
+  // 命中点の閃光と、斬った向きに走る光の線
+  impact.flash(v1, p2.height * (strong ? 2.6 : 1.7), strong ? 0.2 : 0.15);
+  const [sdx, sdy, sdz] = SLASH_DIR[player.attackIndex];
+  slashWorld.set(sdx, sdy, sdz).applyAxisAngle(THREE.Object3D.DEFAULT_UP, p1.group.rotation.y).normalize();
+  impact.streak(v1, slashWorld, camera, p2.height * (strong ? 2.2 : 1.6));
+  if (strong) impact.ring(p2.group.position, p2.height * 1.3, 0.35);
 }
 
 // デバッグ用
@@ -231,6 +255,7 @@ function step(realDt) {
   p1.update(dt, checkHit); // 姿勢を進めるたびに、その時点の刃の位置で当たり判定
   p2.update(dt);
   sparks.update(dt);
+  impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
   flash = Math.max(0, flash - realDt);
   p2.setFlash(flash > 0 ? 1 : 0);
 

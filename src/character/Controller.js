@@ -27,7 +27,7 @@ export const ATTACKS = [
   { anim: 'attack2', duration: 0.44, active: [0.34, 0.64], chain: 0.72, lunge: [0.26, 0.5, 10], power: 1 },
   { anim: 'attack3', duration: 0.68, active: [0.5, 0.71], chain: 0.86, lunge: [0.24, 0.58, 14], power: 2 },
 ];
-export const IDEAL_RANGE = 3.9; // 踏み込みで詰める間合い（リグ単位）。これより近づかない
+export const IDEAL_RANGE = 4.9; // 踏み込みで詰める間合い（リグ単位）。これより近づかない
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
 
 const TWO_PI = Math.PI * 2;

@@ -10,6 +10,9 @@ export const SWORD = {
   bladeThick: 0.07,
 };
 
+// 斬撃のオーラ（刃を包む光）。end が攻撃の届く長さになる
+export const AURA = { start: 0.25, end: 5.4, width: 0.95, color: 0x4fd8ff };
+
 const COLORS = {
   blade: 0xdfe5ec,
   fuller: 0xaeb7c2,
@@ -50,6 +53,25 @@ function tipGeometry(width, thick, length) {
   return g;
 }
 
+// 木の葉形（根元と先端がとがり、中ほどが膨らむ）の板。plane: 幅を取る軸 'x' | 'y'
+function leafGeometry(z0, z1, width, plane) {
+  const N = 14;
+  const positions = [];
+  const index = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N;
+    // 根元寄りが一番太く、先端へ向けて細くなる
+    const w = (width / 2) * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.7)), 0.8);
+    const z = z0 + (z1 - z0) * t;
+    if (plane === 'y') positions.push(0, -w, z, 0, w, z); else positions.push(-w, 0, z, w, 0, z);
+    if (i < N) { const k = i * 2; index.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  g.setIndex(index);
+  return g;
+}
+
 export function createSword() {
   const S = SWORD;
   const sword = new THREE.Group();
@@ -79,8 +101,38 @@ export function createSword() {
 
   sword.add(blade, tip, fuller, guard, guardCore, grip, pommel);
 
-  // 剣の軌跡（トレイル）を描くための刃の根元と先端
+  // ---- 斬撃のオーラ: 攻撃中、刃を包んで剣より長く伸びる光の刃 ----
+  const aura = new THREE.Group();
+  aura.name = 'SwordAura';
+  const outerMat = new THREE.MeshBasicMaterial({
+    color: AURA.color, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+    depthWrite: false, side: THREE.DoubleSide, fog: false,
+  });
+  const coreMat = outerMat.clone();
+  coreMat.color.set(0xffffff);
+  // 刃の面に沿った板と、それに直交する板を重ねて、どの角度からも厚みが見えるようにする
+  const outerA = new THREE.Mesh(leafGeometry(AURA.start, AURA.end, AURA.width, 'y'), outerMat);
+  const outerB = new THREE.Mesh(leafGeometry(AURA.start, AURA.end, AURA.width * 0.45, 'x'), outerMat);
+  const coreA = new THREE.Mesh(leafGeometry(AURA.start, AURA.end - 0.25, AURA.width * 0.42, 'y'), coreMat);
+  const coreB = new THREE.Mesh(leafGeometry(AURA.start, AURA.end - 0.25, AURA.width * 0.2, 'x'), coreMat);
+  aura.add(outerA, outerB, coreA, coreB);
+  aura.visible = false;
+  sword.add(aura);
+
+  // level: 0 = 消えている, 1 = 全開。time でゆらめかせる
+  sword.userData.setAura = (level, time) => {
+    aura.visible = level > 0.02;
+    if (!aura.visible) return;
+    const flicker = 1 + Math.sin(time * 47) * 0.06 + Math.sin(time * 31 + 1.7) * 0.05;
+    aura.scale.set(flicker, (0.55 + 0.45 * level) * flicker, 0.35 + 0.65 * level);
+    outerMat.opacity = 0.55 * level;
+    coreMat.opacity = 0.85 * level;
+  };
+
+  // 当たり判定と軌跡に使う「刃」の根元と先端。先端はオーラの先まで（剣そのものより長い）
   sword.userData.base = new THREE.Vector3(0, 0, S.bladeStart + 0.25);
-  sword.userData.tip = new THREE.Vector3(0, 0, S.bladeStart + S.bladeLength + S.tipLength);
+  sword.userData.tip = new THREE.Vector3(0, 0, AURA.end);
+  sword.userData.trailBase = new THREE.Vector3(0, 0, AURA.end * 0.52); // 軌跡は外側半分だけ（細い弧にする）
+  sword.userData.bladeTip = new THREE.Vector3(0, 0, S.bladeStart + S.bladeLength + S.tipLength);
   return sword;
 }

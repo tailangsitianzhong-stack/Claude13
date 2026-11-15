@@ -204,6 +204,8 @@ export function createCharacter(options = {}) {
   // 剣を振っている間は 1 フレームを細かく刻んで姿勢を進める。
   // 軌跡がなめらかな弧になり、速い振りでも当たり判定（onSubstep）が刃の通り道を取りこぼさない
   let lastAttackT = 0;
+  let auraLevel = 0;
+  let auraTime = 0;
   const update = (dt, onSubstep) => {
     if (trail && animator.trailOn && !animator.debug) {
       const SUB = 5;
@@ -223,6 +225,13 @@ export function createCharacter(options = {}) {
     }
     lastAttackT = animator.attackT;
     if (trail) trail.update(dt);
+    if (sword) {
+      // 斬撃のオーラ: 振りかぶりで灯り、斬っている間は全開、終わるとすっと消える
+      const want = animator.trailOn ? 1 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
+      auraLevel += (want - auraLevel) * (1 - Math.exp(-(want > auraLevel ? 30 : 9) * dt));
+      auraTime += dt;
+      sword.userData.setAura(animator.debug ? (animator.debug.aura ?? 0) : auraLevel, auraTime);
+    }
   };
 
 

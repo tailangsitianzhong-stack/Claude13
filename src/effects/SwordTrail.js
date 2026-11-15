@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 
 const MAX = 40;        // 保持するサンプル数
-const LIFE = 0.16;     // 軌跡が消えるまでの秒数
+const LIFE = 0.13;     // 軌跡が消えるまでの秒数
 const a = new THREE.Vector3();
 const b = new THREE.Vector3();
 
@@ -27,6 +27,7 @@ export class SwordTrail {
     geo.setDrawRange(0, 0);
     this.mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
       vertexColors: true, transparent: true, side: THREE.DoubleSide, depthWrite: false, fog: false,
+      blending: THREE.AdditiveBlending, // 光の帯として重ねる
     }));
     this.mesh.frustumCulled = false;
     this.mesh.name = 'SwordTrail';
@@ -34,7 +35,7 @@ export class SwordTrail {
 
   // 現在の刃の位置を記録（剣を振っている間だけ呼ぶ）
   sample() {
-    a.copy(this.sword.userData.base).applyMatrix4(this.sword.matrixWorld);
+    a.copy(this.sword.userData.trailBase ?? this.sword.userData.base).applyMatrix4(this.sword.matrixWorld);
     b.copy(this.sword.userData.tip).applyMatrix4(this.sword.matrixWorld);
     this.samples.push({ base: a.clone(), tip: b.clone(), age: 0 });
     if (this.samples.length > MAX) this.samples.shift();
@@ -49,8 +50,8 @@ export class SwordTrail {
       const s = this.samples[i];
       const alpha = Math.max(0, 1 - s.age / LIFE);
       this.positions.set([s.base.x, s.base.y, s.base.z, s.tip.x, s.tip.y, s.tip.z], i * 6);
-      // 根元側は透明、先端側ほど明るい白
-      this.colors.set([0.75, 0.9, 1, 0, 1, 1, 1, alpha * 0.65], i * 8);
+      // 根元側は透明な水色、先端側ほど明るい。消え際は青みが残る
+      this.colors.set([0.2, 0.7, 1, 0, 0.45 + 0.55 * alpha, 0.85 + 0.15 * alpha, 1, alpha * alpha * 0.38], i * 8);
     }
     const geo = this.mesh.geometry;
     geo.attributes.position.needsUpdate = true;
