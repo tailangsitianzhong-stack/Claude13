@@ -26,8 +26,8 @@ const rollQuat = new THREE.Quaternion();
 const AXIS_Z = new THREE.Vector3(0, 0, 1);
 
 /**
- * 攻撃の手応えを出すカメラ演出。OrbitControls の計算結果に「上乗せ」するだけなので、
- * 描画の直前に apply()、描画の直後に restore() を呼ぶ（操作側の状態は汚さない）。
+ * 攻撃の手応えを出すカメラ演出。追従カメラが決めた位置に「上乗せ」するだけなので、
+ * 描画の直前に apply()、描画の直後に restore() を呼ぶ（追従カメラ側の状態は汚さない）。
  *
  *  - kick(x, y, z)  : 斬る方向へカメラを一瞬振る（カメラから見た右・上・手前）
  *  - roll(amount)   : 画面を傾ける
@@ -35,9 +35,10 @@ const AXIS_Z = new THREE.Vector3(0, 0, 1);
  *  - shake(amount)  : 画面揺れを足す（0〜1）
  */
 export class CameraFx {
-  constructor(camera, controls) {
+  // getDistance: カメラと注視点の距離を返す関数（揺れ幅の基準）
+  constructor(camera, getDistance) {
     this.camera = camera;
-    this.controls = controls;
+    this.getDistance = getDistance;
     this.baseFov = camera.fov;
     this.px = new Spring(260, 22);
     this.py = new Spring(260, 22);
@@ -64,7 +65,7 @@ export class CameraFx {
     basePos.copy(cam.position);
     baseQuat.copy(cam.quaternion);
     // 揺れ幅はカメラと注視点の距離に比例させる（ズームしても同じ見え方）
-    const dist = cam.position.distanceTo(this.controls.target);
+    const dist = this.getDistance();
     const t = this.time;
     const sh = this.trauma * this.trauma;
     const nx = Math.sin(t * 91.7) * 0.6 + Math.sin(t * 53.3 + 1.3) * 0.4;

@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
 import { CharacterController, ATTACKS } from './character/Controller.js';
 import { input } from './input.js';
 import { TouchControls } from './ui/TouchControls.js';
 import { CameraFx } from './camera/CameraFx.js';
+import { ThirdPersonCamera } from './camera/ThirdPersonCamera.js';
 import { Sparks } from './effects/Sparks.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -19,20 +19,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87c5ff);
 scene.fog = new THREE.Fog(0x87c5ff, 160, 420);
 
-const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.05, 1000);
-camera.position.set(-0.3, 0.9, 2.4);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(-0.3, 0.4, 0);
-controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI * 0.48;
-controls.minDistance = 0.8;
-controls.maxDistance = 260;
-controls.enablePan = false;
-// 左クリックは攻撃に使うので、カメラ回転は右ドラッグ
-controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
-// スマホ: UI の外を1本指でドラッグ = カメラ回転、2本指 = ズーム
-controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 1000);
 
 // ライト（ロブロックスっぽい明るくフラットな光）
 scene.add(new THREE.HemisphereLight(0xdff1ff, 0x5a7a3a, 1.4));
@@ -67,7 +54,12 @@ const dummy = new CharacterController(p2, { bounds: stage.bounds });
 dummy.idle = 'fight';
 const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleStance: false };
 
-const fx = new CameraFx(camera, controls);
+// 三人称の追従カメラ。最初は P1 の真後ろから
+const view = new ThirdPersonCamera(camera, renderer.domElement, { bounds: stage.bounds });
+view.setBehind(p1.group.rotation.y);
+const fx = new CameraFx(camera, () => view.currentDistance);
+// 確認用: game.follow = false にすると追従を止め、camera.position と controls.target で自由に置ける
+const controls = { target: new THREE.Vector3() };
 const sparks = new Sparks(scene);
 let hitStop = 0;   // ヒットストップの残り秒数（命中の瞬間、時間をほぼ止める）
 let flash = 0;     // P2 を白く光らせる残り秒数
@@ -75,7 +67,6 @@ let flash = 0;     // P2 を白く光らせる残り秒数
 const forward = new THREE.Vector3();
 const v1 = new THREE.Vector3();
 const camInverse = new THREE.Quaternion();
-const follow = p1.group.position.clone(); // カメラが追う点（P1 を少し遅れて追う）
 
 const touch = new TouchControls();
 
@@ -99,6 +90,8 @@ function readCommand() {
     toggleStance: input.wasPressed('KeyF'),
   };
 }
+
+const ATTACK_ALIGN_RATE = 1.2; // 攻撃中にカメラが背後へ回り込む速さ（0 で回り込まない）
 
 // 斬る方向（キャラから見た 左, 上, 前）。カメラをこの向きへ振る
 const SLASH_DIR = [
@@ -185,7 +178,7 @@ function checkHit() {
 }
 
 // デバッグ用
-window.game = { touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
+window.game = { view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -241,22 +234,19 @@ function step(realDt) {
   flash = Math.max(0, flash - realDt);
   p2.setFlash(flash > 0 ? 1 : 0);
 
-  // カメラは P1 を少し遅れて追いかける（踏み込みや走りの勢いが画面に出る）。ジャンプには控えめに付いていく
+  // 追従カメラ。視点を触っていないときだけ、進行方向（攻撃中は狙った方向）の背後へゆっくり回り込む
   if (window.game.follow) {
-    const pos = p1.group.position;
-    const k = 1 - Math.exp(-11 * realDt);
-    const dx = (pos.x - follow.x) * k;
-    const dy = (pos.y * 0.4 - follow.y) * k;
-    const dz = (pos.z - follow.z) * k;
-    follow.x += dx; follow.y += dy; follow.z += dz;
-    camera.position.x += dx; camera.position.y += dy; camera.position.z += dz;
-    controls.target.x += dx; controls.target.y += dy; controls.target.z += dz;
+    // 視点と移動は分離: 歩いても走ってもカメラの向きは変わらない。
+    // 攻撃中だけ、狙っている相手が画面に収まるよう背後へゆっくり回り込む（視点を触った直後は回らない）
+    const align = player.state === 'attack' ? { heading: player.aimYaw, rate: ATTACK_ALIGN_RATE } : null;
+    view.update(realDt, p1.group.position, align);
+  } else {
+    camera.lookAt(controls.target);
   }
 
-  controls.update();
   fx.update(realDt);
   fx.apply();
-  renderer.render(scene, camera);
+  if (!window.game.skipRender) renderer.render(scene, camera); // skipRender: 確認用の早送り
   fx.restore();
 }
 window.game.step = step; // manual=true のとき、外からコマ送りできる（動作確認用）
