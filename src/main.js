@@ -4,6 +4,7 @@ import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
 import { CharacterController, ATTACKS } from './character/Controller.js';
 import { input } from './input.js';
+import { TouchControls } from './ui/TouchControls.js';
 import { CameraFx } from './camera/CameraFx.js';
 import { Sparks } from './effects/Sparks.js';
 
@@ -30,6 +31,8 @@ controls.maxDistance = 260;
 controls.enablePan = false;
 // 左クリックは攻撃に使うので、カメラ回転は右ドラッグ
 controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+// スマホ: UI の外を1本指でドラッグ = カメラ回転、2本指 = ズーム
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_ROTATE };
 
 // ライト（ロブロックスっぽい明るくフラットな光）
 scene.add(new THREE.HemisphereLight(0xdff1ff, 0x5a7a3a, 1.4));
@@ -74,22 +77,25 @@ const v1 = new THREE.Vector3();
 const camInverse = new THREE.Quaternion();
 const follow = p1.group.position.clone(); // カメラが追う点（P1 を少し遅れて追う）
 
+const touch = new TouchControls();
+
 function readCommand() {
-  const ix = (input.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (input.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
-  const iz = (input.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (input.isDown('KeyS', 'ArrowDown') ? 1 : 0);
+  let ix = (input.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (input.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
+  let iz = (input.isDown('KeyW', 'ArrowUp') ? 1 : 0) - (input.isDown('KeyS', 'ArrowDown') ? 1 : 0);
+  // キーボードは常に全力、スティックは倒した量（0〜1）で速さが変わる
+  const keyLen = Math.hypot(ix, iz);
+  if (keyLen > 0) { ix /= keyLen; iz /= keyLen; } else { ix = touch.x; iz = touch.y; }
   // カメラの向きを基準に「前後左右」をワールドの向きへ変換
   camera.getWorldDirection(forward);
   forward.y = 0;
   forward.normalize();
   let x = forward.x * iz - forward.z * ix;
   let z = forward.z * iz + forward.x * ix;
-  const len = Math.hypot(x, z);
-  if (len > 0) { x /= len; z /= len; }
   return {
     x, z,
-    run: input.isDown('ShiftLeft', 'ShiftRight'),
+    run: input.isDown('ShiftLeft', 'ShiftRight') || touch.run,
     jump: input.wasPressed('Space'),
-    attack: input.isDown('KeyJ', 'Mouse0'),
+    attack: input.isDown('KeyJ', 'Mouse0') || touch.attack,
     toggleStance: input.wasPressed('KeyF'),
   };
 }
@@ -179,7 +185,7 @@ function checkHit() {
 }
 
 // デバッグ用
-window.game = { stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
+window.game = { touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;

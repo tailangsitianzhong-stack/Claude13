@@ -12,7 +12,8 @@ addEventListener('blur', () => down.clear());
 
 // マウスの左ボタンは 'Mouse0' というキーとして扱う（攻撃用）
 addEventListener('pointerdown', (e) => {
-  if (e.button !== 0 || e.target.tagName !== 'CANVAS') return;
+  // タッチは攻撃にしない（画面のドラッグはカメラ回転に使う）
+  if (e.pointerType !== 'mouse' || e.button !== 0 || e.target.tagName !== 'CANVAS') return;
   pressed.add('Mouse0');
   down.add('Mouse0');
 });

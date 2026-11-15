@@ -2,10 +2,14 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Block Fighter - Stage</title>
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #87c5ff; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #87c5ff; overscroll-behavior: none; }
+      canvas { display: block; touch-action: none; }
+      #hud.touch { display: none; }
       #hud {
         position: fixed; left: 12px; top: 10px; color: #fff;
         font: 13px/1.5 system-ui, sans-serif; text-shadow: 0 1px 2px #0008;
