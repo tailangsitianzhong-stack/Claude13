@@ -24,6 +24,9 @@ export class ThirdPersonCamera {
     this.minPitch = -0.15;
     this.maxPitch = 1.25;
     this.height = 0.95;         // 注視点の高さ。頭より上にして、正面の相手が自分の体に隠れないようにする
+    this.zoom = 1;              // 距離の倍率（演出で一時的に引くとき用。zoomTarget へなめらかに寄る）
+    this.zoomTarget = 1;
+    this.heightFollow = 0.4;    // ジャンプの高さにどれだけ付いていくか（0〜1）
     this.followRate = 11;       // 注視点がキャラを追う速さ（小さいほど遅れて付いてくる）
     this.alignDelay = 1.0;      // 視点操作をやめてから自動で回り込み始めるまでの秒数
     this.pivot = new THREE.Vector3();
@@ -91,14 +94,16 @@ export class ThirdPersonCamera {
     this.snapped = true;
     this.pivot.x += (target.x - this.pivot.x) * k;
     this.pivot.z += (target.z - this.pivot.z) * k;
-    this.pivot.y += (target.y * 0.4 + this.height - this.pivot.y) * k;
+    this.pivot.y += (target.y * this.heightFollow + this.height - this.pivot.y) * k;
+    this.zoom += (this.zoomTarget - this.zoom) * (1 - Math.exp(-7 * dt));
+    const distance = this.distance * this.zoom;
 
     const cp = Math.cos(this.pitch);
     const cam = this.camera;
     cam.position.set(
-      this.pivot.x + Math.sin(this.yaw) * cp * this.distance,
-      this.pivot.y + Math.sin(this.pitch) * this.distance,
-      this.pivot.z + Math.cos(this.yaw) * cp * this.distance,
+      this.pivot.x + Math.sin(this.yaw) * cp * distance,
+      this.pivot.y + Math.sin(this.pitch) * distance,
+      this.pivot.z + Math.cos(this.yaw) * cp * distance,
     );
     if (this.bounds) {
       const b = this.bounds;

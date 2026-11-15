@@ -36,8 +36,24 @@ export const AIR_SLAM = {
   forward: 6.5,     // 相手がいないとき、前方へ突っ込む距離（リグ単位）
   maxForward: 13,   // 相手へ向かって突っ込める最大距離
   stopShort: 3.2,   // 相手の手前これだけの位置に着地する
-  radius: 7,        // 着地時の攻撃範囲の半径（リグ単位）
+  radius: 14,       // 着地時の攻撃範囲の半径（リグ単位）
+  cooldown: 0.8,    // 次に出せるようになるまでの秒数（着地から数える）
   reach: 2.2,       // 範囲の中心はキャラの前方これだけ先（剣が地面を叩く位置）
+};
+// コンボ技（掴み上げ）。通常攻撃の3段目を当てた直後、ジャンプボタンで出せる
+export const FINISHER = {
+  window: 0.5,      // 3段目の命中からこの秒数だけ受け付ける
+  range: 12,        // 相手がこの距離以内なら掴める（リグ単位）
+  holdDist: 2.1,    // 掴んでいる間の相手との間隔
+  dash: 0.1,        // 相手の目の前まで詰める時間（秒）
+  grip: 0.16,       // 胸ぐらを掴んで止まる時間
+  rise: 0.5,        // 持ち上げて跳ぶ時間
+  height: 15,       // 跳び上がる高さ（リグ単位。身長の約3倍）
+  throwTime: 0.22,  // 空中で投げ下ろす動きの長さ
+  release: 0.1,     // そのうち、手を離す瞬間
+  fall: 0.14,       // 相手が地面に届くまでの時間
+  throwDist: 3.6,   // 相手を叩きつける地点（自分の真下から前方へ）
+  pause: 0.1,       // 相手が地面に当たってから、剣で追撃に入るまでの間
 };
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
 
@@ -55,7 +71,9 @@ export class CharacterController {
     this.vx = 0;
     this.vz = 0;
     this.vy = 0;
-    this.state = 'ground'; // 'ground' | 'crouch' | 'air' | 'land' | 'attack' | 'airSlam' | 'hit'
+    // 自分の行動: 'ground' | 'crouch' | 'air' | 'land' | 'attack' | 'airSlam' | 'finisher' | 'hit'
+    // 掴み技を受けている間: 'held'（掴まれている）| 'thrown'（投げ落とされている）| 'down'（倒れている）
+    this.state = 'ground';
     this.timer = 0;
     this.idle = 'stand';   // 止まっているときのポーズ: 'stand' | 'fight'
     this.jumpBuffer = 0;
@@ -63,6 +81,12 @@ export class CharacterController {
     this.slamT = 0;
     this.slamVx = 0;
     this.slamVz = 0;
+    this.slamCooldown = 0;    // 叩きつけを次に出せるまでの残り秒数
+    this.victim = null;       // 掴み技の相手（CharacterController）
+    this.finisherWindow = 0;  // 掴み技を出せる残り秒数（3段目を当てると入る）
+    this.finisherSlam = false; // 今の叩きつけが掴み技の締めか（威力が上がる）
+    this.fin = null;          // 掴み技の進行状況
+    this.downTimer = 0;
 
     this.target = null;       // 攻撃時に自動で向く相手（Character）
     this.attackIndex = 0;     // 今出している攻撃の番号
@@ -97,17 +121,181 @@ export class CharacterController {
     this.events.push({ type: 'attackStart', index });
   }
 
+  // 空中攻撃（叩きつけ）を始める。inputYaw: 入力している向き（なければ null）
+  startAirSlam(inputYaw) {
+    const { group, animator, scale: S } = this.c;
+    this.state = 'airSlam';
+    this.slamT = 0;
+    this.vy = 0;
+    // 向き: 入力があればその方向。近くに相手がいればそちらを優先し、その手前に着地する
+    if (inputYaw != null) group.rotation.y = inputYaw;
+    let forwardDist = AIR_SLAM.forward * S;
+    if (this.target) {
+      const dx = this.target.group.position.x - group.position.x;
+      const dz = this.target.group.position.z - group.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d < (AIR_SLAM.maxForward + AIR_SLAM.stopShort) * S) {
+        group.rotation.y = Math.atan2(dx, dz);
+        forwardDist = Math.max(0, d - AIR_SLAM.stopShort * S);
+      }
+    }
+    // 地面に届くまでの時間で、ちょうど forwardDist 進む速さ
+    const fall = Math.max(0.05, group.position.y / (AIR_SLAM.diveSpeed * S));
+    this.slamVx = (Math.sin(group.rotation.y) * forwardDist) / fall;
+    this.slamVz = (Math.cos(group.rotation.y) * forwardDist) / fall;
+    animator.attackT = 0;
+    animator.play('airSlam', 0.06);
+    this.events.push({ type: 'airSlamStart', index: 2 });
+  }
+
+  // ============================================================
+  // コンボ技: 掴み上げ → 跳躍 → 投げ落とし → 剣で叩きつけ
+  // ============================================================
+  canGrab() {
+    const v = this.victim;
+    if (!v || !this.c.sword || this.c.group.position.y > 0.001) return false;
+    if (v.state !== 'ground' && v.state !== 'hit') return false;
+    const dx = v.c.group.position.x - this.c.group.position.x;
+    const dz = v.c.group.position.z - this.c.group.position.z;
+    return Math.hypot(dx, dz) < FINISHER.range * this.c.scale;
+  }
+
+  startFinisher() {
+    const { group, animator, scale: S } = this.c;
+    const v = this.victim;
+    const vg = v.c.group;
+    const dx = vg.position.x - group.position.x;
+    const dz = vg.position.z - group.position.z;
+    const d = Math.hypot(dx, dz) || 1;
+    const fx = dx / d;
+    const fz = dz / d;
+    this.fin = {
+      phase: 'dash', t: 0, fx, fz, released: false, crashed: false, crashT: 0,
+      fromX: group.position.x, fromZ: group.position.z,
+      // 相手の目の前（掴める間隔）まで詰める
+      toX: vg.position.x - fx * FINISHER.holdDist * S, toZ: vg.position.z - fz * FINISHER.holdDist * S,
+      throwFrom: null, throwTo: null, throwT: 0,
+    };
+    this.state = 'finisher';
+    this.finisherWindow = 0;
+    this.vx = this.vz = this.vy = 0;
+    this.attackActive = false;
+    animator.trailOn = false;
+    group.rotation.y = Math.atan2(fx, fz);
+    animator.play('grab', 0.06);
+
+    v.state = 'held';
+    v.vx = v.vz = v.vy = 0;
+    v.attackActive = false;
+    vg.rotation.y = Math.atan2(-fx, -fz); // 掴まれた側は相手の方を向く
+    v.c.animator.play('limp', 0.08);
+    this.events.push({ type: 'finisherGrab' });
+  }
+
+  // 掴んでいる相手を、自分の左手の先（胸ぐらの高さ）に付けて動かす
+  carryVictim(lift) {
+    const { group, scale: S } = this.c;
+    const vg = this.victim.c.group;
+    const f = this.fin;
+    vg.position.set(
+      group.position.x + f.fx * FINISHER.holdDist * S,
+      group.position.y + lift * S,
+      group.position.z + f.fz * FINISHER.holdDist * S,
+    );
+  }
+
+  updateFinisher(dt) {
+    const { group, animator, scale: S } = this.c;
+    const F = FINISHER;
+    const f = this.fin;
+    const v = this.victim;
+    const vg = v.c.group;
+    f.t += dt;
+
+    if (f.phase === 'dash') {
+      // 一瞬で間合いを詰めて掴む
+      const k = Math.min(1, f.t / F.dash);
+      group.position.x = f.fromX + (f.toX - f.fromX) * k;
+      group.position.z = f.fromZ + (f.toZ - f.fromZ) * k;
+      if (k >= 1) { f.phase = 'grip'; f.t = 0; this.events.push({ type: 'finisherGrip' }); }
+    } else if (f.phase === 'grip') {
+      // 胸ぐらを掴んで少し持ち上げる
+      this.carryVictim(0.7 * Math.min(1, f.t / F.grip));
+      if (f.t >= F.grip) {
+        f.phase = 'rise';
+        f.t = 0;
+        animator.play('carry', 0.08);
+        this.events.push({ type: 'finisherJump' });
+      }
+    } else if (f.phase === 'rise') {
+      // 相手ごと高く跳び上がる（勢いよく飛び出して、頂点で止まる）
+      const k = Math.min(1, f.t / F.rise);
+      group.position.y = F.height * S * (1 - (1 - k) * (1 - k));
+      this.carryVictim(0.7);
+      if (k >= 1) {
+        f.phase = 'throw';
+        f.t = 0;
+        animator.attackT = 0;
+        animator.play('throw', 0.05);
+      }
+    } else if (f.phase === 'throw') {
+      animator.attackT = Math.min(1, f.t / F.throwTime);
+      if (!f.released) {
+        this.carryVictim(0.7);
+        if (f.t >= F.release) {
+          // 手を離す: 相手は前方の地面へ一直線に落ちる
+          f.released = true;
+          f.throwFrom = vg.position.clone();
+          f.throwTo = { x: group.position.x + f.fx * F.throwDist * S, z: group.position.z + f.fz * F.throwDist * S };
+          if (this.bounds) {
+            const b = this.bounds;
+            f.throwTo.x = Math.min(b.maxX - 0.3, Math.max(b.minX + 0.3, f.throwTo.x));
+            f.throwTo.z = Math.min(b.maxZ - 0.3, Math.max(b.minZ + 0.3, f.throwTo.z));
+          }
+          v.state = 'thrown';
+          v.c.animator.play('thrown', 0.05);
+          this.events.push({ type: 'finisherThrow' });
+        }
+      } else if (!f.crashed) {
+        f.throwT += dt;
+        const k = Math.min(1, f.throwT / F.fall);
+        const lie = 0.4 * S; // 倒れたときの体の高さ
+        vg.position.set(
+          f.throwFrom.x + (f.throwTo.x - f.throwFrom.x) * k,
+          f.throwFrom.y + (lie - f.throwFrom.y) * k * k,
+          f.throwFrom.z + (f.throwTo.z - f.throwFrom.z) * k,
+        );
+        vg.rotation.x = -Math.PI / 2 * Math.min(1, k * 1.6); // 背中から落ちる
+        if (k >= 1) {
+          f.crashed = true;
+          v.state = 'down';
+          v.downTimer = 1.6;
+          v.c.animator.play('down', 0.04);
+          this.events.push({ type: 'finisherCrash', x: f.throwTo.x, z: f.throwTo.z });
+        }
+      } else {
+        f.crashT += dt;
+        if (f.crashT >= F.pause && f.t >= F.throwTime) {
+          // 締め: 倒れた相手へ剣で叩きつける
+          this.fin = null;
+          this.finisherSlam = true;
+          this.startAirSlam(null);
+        }
+      }
+    }
+  }
+
   // 攻撃を受けた: (dx, dz) の向きへ吹き飛び、のけぞる
   hit(dx, dz, power = 1) {
     const { group, animator, scale } = this.c;
     const len = Math.hypot(dx, dz) || 1;
-    const speed = (power > 1 ? 13 : 8) * scale;
+    const speed = (power > 2 ? 24 : power > 1 ? 13 : 8) * scale;
     this.vx = (dx / len) * speed;
     this.vz = (dz / len) * speed;
     this.vy = 0;
     group.position.y = 0;
     this.state = 'hit';
-    this.hitDuration = power > 1 ? 0.6 : 0.4;
+    this.hitDuration = power > 2 ? 0.9 : power > 1 ? 0.6 : 0.4;
     this.attackActive = false;
     animator.trailOn = false;
     animator.hitT = 0;
@@ -119,6 +307,31 @@ export class CharacterController {
     const S = scale;
     const moving = Math.hypot(cmd.x, cmd.z) > 0.01;
     const topSpeed = (cmd.run ? MOVE.runSpeed : MOVE.walkSpeed) * S;
+
+    this.slamCooldown = Math.max(0, this.slamCooldown - dt);
+    this.finisherWindow = Math.max(0, this.finisherWindow - dt);
+    // 倒れた姿勢からは自然に起き上がる
+    if (this.state !== 'held' && this.state !== 'thrown' && this.state !== 'down' && group.rotation.x !== 0) {
+      group.rotation.x *= Math.exp(-9 * dt);
+      if (Math.abs(group.rotation.x) < 0.01) group.rotation.x = 0;
+    }
+
+    // 掴まれている・投げられている間は、相手側が位置と姿勢を動かす
+    if (this.state === 'held' || this.state === 'thrown') return;
+    if (this.state === 'down') {
+      this.downTimer -= dt;
+      if (this.downTimer <= 0) { this.state = 'ground'; group.position.y = 0; }
+      return;
+    }
+    if (this.state === 'finisher') {
+      this.updateFinisher(dt);
+      return;
+    }
+    // コンボ技: 3段目を当てた直後にジャンプを押すと、相手を掴み上げる
+    if (cmd.jump && this.finisherWindow > 0 && this.canGrab()) {
+      this.startFinisher();
+      return;
+    }
 
     if (cmd.toggleStance) {
       this.idle = this.idle === 'stand' ? 'fight' : 'stand';
@@ -230,30 +443,8 @@ export class CharacterController {
         group.position.y += this.vy * dt;
         const v0 = Math.sqrt(2 * MOVE.gravity * MOVE.jumpHeight) * S;
         animator.airU = this.vy / v0;
-        if (attackPressed && this.c.sword && group.position.y > AIR_SLAM.minHeight * S) {
-          // 空中攻撃: 近くに相手がいればそちらを向き、剣を振りかぶる
-          this.state = 'airSlam';
-          this.slamT = 0;
-          this.vy = 0;
-          // 向き: 入力があればその方向。近くに相手がいればそちらを優先し、その手前に着地する
-          if (moving) group.rotation.y = Math.atan2(cmd.x, cmd.z);
-          let forwardDist = AIR_SLAM.forward * S;
-          if (this.target) {
-            const dx = this.target.group.position.x - group.position.x;
-            const dz = this.target.group.position.z - group.position.z;
-            const d = Math.hypot(dx, dz);
-            if (d < (AIR_SLAM.maxForward + AIR_SLAM.stopShort) * S) {
-              group.rotation.y = Math.atan2(dx, dz);
-              forwardDist = Math.max(0, d - AIR_SLAM.stopShort * S);
-            }
-          }
-          // 地面に届くまでの時間で、ちょうど forwardDist 進む速さ
-          const fall = Math.max(0.05, group.position.y / (AIR_SLAM.diveSpeed * S));
-          this.slamVx = (Math.sin(group.rotation.y) * forwardDist) / fall;
-          this.slamVz = (Math.cos(group.rotation.y) * forwardDist) / fall;
-          animator.attackT = 0;
-          animator.play('airSlam', 0.06);
-          this.events.push({ type: 'airSlamStart', index: 2 });
+        if (attackPressed && this.c.sword && this.slamCooldown <= 0 && group.position.y > AIR_SLAM.minHeight * S) {
+          this.startAirSlam(moving ? Math.atan2(cmd.x, cmd.z) : null);
         } else if (group.position.y <= 0 && this.vy < 0) {
           group.position.y = 0;
           this.vy = 0;
@@ -284,6 +475,7 @@ export class CharacterController {
           animator.attackT = this.attackT;
           animator.trailOn = false;
           animator.play('attack3', 0.05);
+          this.slamCooldown = AIR_SLAM.cooldown;
           this.events.push({ type: 'airSlamLand', index: 2 });
         }
         break;

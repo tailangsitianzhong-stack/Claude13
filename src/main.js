@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
-import { CharacterController, ATTACKS, AIR_SLAM } from './character/Controller.js';
+import { CharacterController, ATTACKS, AIR_SLAM, FINISHER } from './character/Controller.js';
 import { input } from './input.js';
 import { TouchControls } from './ui/TouchControls.js';
 import { CameraFx } from './camera/CameraFx.js';
@@ -51,8 +51,9 @@ for (const c of characters) if (c.trail) scene.add(c.trail.mesh);
 
 // P1 をキーボードで操作。P2 は今のところ立っているだけ（攻撃を受けるとのけぞる）
 const player = new CharacterController(p1, { bounds: stage.bounds });
-player.target = p2;
 const dummy = new CharacterController(p2, { bounds: stage.bounds });
+player.target = p2;
+player.victim = dummy; // コンボ技で掴む相手
 dummy.idle = 'fight';
 const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleStance: false };
 
@@ -73,6 +74,7 @@ const v1 = new THREE.Vector3();
 const camInverse = new THREE.Quaternion();
 
 const touch = new TouchControls();
+const comboPrompt = document.getElementById('combo-prompt');
 
 function readCommand() {
   let ix = (input.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (input.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
@@ -116,8 +118,42 @@ function toCameraSpace(character, [x, y, z]) {
 
 // 攻撃の節目ごとのカメラ演出
 function onAttackEvent(e) {
-  const d = toCameraSpace(p1, SLASH_DIR[e.index]);
-  if (e.type === 'airSlamStart') {
+  const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
+  if (e.type === 'finisherGrab') {
+    fx.zoom(60);
+  } else if (e.type === 'finisherGrip') {
+    // 胸ぐらを掴んだ瞬間: 一瞬止めて、ぐっと寄る
+    hitStop = 0.09;
+    flash = 0.08;
+    fx.shake(0.35);
+    fx.zoom(-120);
+    v1.set((p1.group.position.x + p2.group.position.x) / 2, p1.height * 0.7, (p1.group.position.z + p2.group.position.z) / 2);
+    impact.flash(v1, p1.height * 1.4, 0.14);
+  } else if (e.type === 'finisherJump') {
+    // 踏み切り: 足元に衝撃波、視野が広がる
+    fx.zoom(150);
+    fx.kick(0, 0.9, 0.6);
+    impact.ring(p1.group.position, p1.height * 1.6, 0.4);
+    v1.set(p1.group.position.x, 0.03, p1.group.position.z);
+    forward.set(0, 0, 0);
+    sparks.burst(v1, forward, 12, p1.height * 0.07, p1.height * 1.8, 0.25, 0.25);
+  } else if (e.type === 'finisherThrow') {
+    fx.kick(0, -1.3, 0);
+    fx.roll(0.9);
+    fx.zoom(60);
+  } else if (e.type === 'finisherCrash') {
+    // 相手が地面に激突
+    hitStop = 0.07;
+    flash = 0.1;
+    fx.shake(0.65);
+    v1.set(e.x, 0.03, e.z);
+    impact.ring(v1, p2.height * 1.8, 0.4);
+    impact.ring(v1, p2.height * 1.0, 0.28);
+    forward.set(0, 0, 0);
+    sparks.burst(v1, forward, 18, p2.height * 0.08, p2.height * 2.4, 0.07, 0.45);
+    sparks.burst(v1, forward, 10, p2.height * 0.07, p2.height * 2.0, 0.25, 0.25);
+    impact.flash(v1.setY(p2.height * 0.3), p2.height * 2.0, 0.16);
+  } else if (e.type === 'airSlamStart') {
     fx.zoom(90);           // 突っ込む勢いで視野が広がる
     fx.kick(0, 0.3, 0.8);
   } else if (e.type === 'airSlamLand') {
@@ -156,7 +192,7 @@ function airSlamImpact() {
   const radius = AIR_SLAM.radius * S;
 
   // 地面: へこみとひび、まわりの地面がめくれ上がる隆起
-  groundBreak.trigger(cx, cz, radius * 0.8);
+  groundBreak.trigger(cx, cz, radius * 0.55);
   // 範囲いっぱいに広がる衝撃波の輪を重ね、土煙と光の粒を巻き上げる
   v1.set(cx, 0.03, cz);
   impact.ring(v1, radius, 0.5);
@@ -172,13 +208,17 @@ function airSlamImpact() {
   fx.zoom(-90);
 
   // 範囲内の相手に命中（中心から外へ吹き飛ばす）
+  const wasFinisher = player.finisherSlam;
+  player.finisherSlam = false;
   const dx = p2.group.position.x - cx;
   const dz = p2.group.position.z - cz;
   if (Math.hypot(dx, dz) > radius) return;
   const ox = p2.group.position.x - p1.group.position.x;
   const oz = p2.group.position.z - p1.group.position.z;
-  dummy.hit(ox, oz, 2);
-  hitStop = 0.14;
+  const finisher = wasFinisher; // 掴み技の締めは、さらに強く吹き飛ばす
+  dummy.hit(ox, oz, finisher ? 3 : 2);
+  hitStop = finisher ? 0.2 : 0.14;
+  if (finisher) { fx.shake(0.5); fx.zoom(-80); impact.ring(p2.group.position, radius * 1.2, 0.6); }
   flash = 0.14;
   fx.shake(0.4);
   fx.zoom(-120);
@@ -225,6 +265,8 @@ function checkHit() {
   const dist = Math.hypot(dx, dz) || 1;
 
   player.hitDone = true;
+  // 3段目を当てたら、少しの間だけコンボ技（掴み上げ）を出せる
+  if (player.attackIndex === 2) player.finisherWindow = FINISHER.window;
   const power = ATTACKS[player.attackIndex].power;
   const strong = power > 1;
   dummy.hit(dx, dz, power);
@@ -271,6 +313,10 @@ function step(realDt) {
   player.update(dt, readCommand());
   dummy.update(dt, NO_INPUT);
   input.endFrame();
+  // コンボ技を出せる間、ジャンプボタン（と PC の案内）を切り替える
+  const canFinish = player.finisherWindow > 0 && player.canGrab();
+  touch.setSpecial(canFinish);
+  comboPrompt.classList.toggle('show', canFinish);
 
   for (const e of player.events) onAttackEvent(e);
   player.events.length = 0;
@@ -281,7 +327,8 @@ function step(realDt) {
   const sx = p1.group.position.x - p2.group.position.x;
   const sz = p1.group.position.z - p2.group.position.z;
   const sep = Math.hypot(sx, sz);
-  if (sep < minDist && sep > 1e-6 && p1.group.position.y < p2.height) {
+  const grappling = player.state === 'finisher' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
+  if (!grappling && sep < minDist && sep > 1e-6 && p1.group.position.y < p2.height) {
     p1.group.position.x = p2.group.position.x + (sx / sep) * minDist;
     p1.group.position.z = p2.group.position.z + (sz / sep) * minDist;
     // 相手に向かう分の速度は消す（押し付けたまま走り続けない）
@@ -313,6 +360,10 @@ function step(realDt) {
     // 視点と移動は分離: 歩いても走ってもカメラの向きは変わらない。
     // 攻撃中だけ、狙っている相手が画面に収まるよう背後へゆっくり回り込む（視点を触った直後は回らない）
     const align = player.state === 'attack' ? { heading: player.aimYaw, rate: ATTACK_ALIGN_RATE } : null;
+    // コンボ技の間はカメラを引き、高く跳んでも2人が画面に収まるようにする
+    const cinematic = player.state === 'finisher' || player.finisherSlam;
+    view.zoomTarget = cinematic ? 2.3 : 1;
+    view.heightFollow = cinematic ? 0.5 : 0.4;
     view.update(realDt, p1.group.position, align);
   } else {
     camera.lookAt(controls.target);

@@ -17,6 +17,14 @@
       }
       canvas { display: block; }
       #hud.touch { display: none; }
+      #combo-prompt {
+        position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%) scale(0.8); z-index: 5;
+        padding: 6px 16px; border-radius: 999px; background: #ffb300; color: #3a2400;
+        font: 800 16px/1.4 system-ui, sans-serif; box-shadow: 0 3px 0 #a86a00; pointer-events: none;
+        opacity: 0; transition: opacity 0.06s, transform 0.06s;
+      }
+      #combo-prompt.show { opacity: 1; transform: translateX(-50%) scale(1); }
+      #hud.touch ~ #combo-prompt, #combo-prompt.touch { display: none; }
       #boot-error {
         position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 30; padding: 10px 12px;
         background: #b3261e; color: #fff; font: 13px/1.5 system-ui, sans-serif; border-radius: 8px;
@@ -39,6 +47,7 @@
         addEventListener('unhandledrejection', function (e) { show(String(e.reason && e.reason.message || e.reason)); });
       })();
     </script>
+    <div id="combo-prompt">Space: 掴み上げ！</div>
     <div id="hud">WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中で攻撃 = 叩きつけ）　左クリック / J: 攻撃（押し続けで連続斬り）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離</div>
     <!-- GitHub Pages などビルドなしの配信でも動くよう、three は同梱ファイルから読む（Vite 使用時は無視される） -->
     <script>

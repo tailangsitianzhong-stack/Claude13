@@ -100,6 +100,7 @@ export function createCharacter(options = {}) {
   const group = new THREE.Group();
   group.name = o.name ?? 'Character';
   group.scale.setScalar(o.scale);
+  group.rotation.order = 'YXZ'; // 向き(Y)を決めてから前後に倒す(X)。倒れた姿勢に使う
 
   // ---- 骨盤 ----
   const hips = joint(group, 0, R.hipY, 0, 'YXZ');
@@ -227,7 +228,7 @@ export function createCharacter(options = {}) {
     if (trail) trail.update(dt);
     if (sword) {
       // 斬撃のオーラ: 振りかぶりで灯り、斬っている間は全開、終わるとすっと消える
-      const want = animator.trailOn ? 1 : animator.name === 'airSlam' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
+      const want = animator.trailOn ? 1 : animator.name === 'airSlam' || animator.name === 'throw' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
       auraLevel += (want - auraLevel) * (1 - Math.exp(-(want > auraLevel ? 30 : 9) * dt));
       auraTime += dt;
       sword.userData.setAura(animator.debug ? (animator.debug.aura ?? 0) : auraLevel, auraTime);

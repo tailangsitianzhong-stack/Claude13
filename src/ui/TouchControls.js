@@ -47,6 +47,14 @@ const CSS = `
   display: grid; place-items: center; transition: transform 0.05s, box-shadow 0.05s; }
 #jump-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(5, 40, 110, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
 #jump-btn svg { width: 54%; height: 54%; }
+/* コンボ技を出せる間: 金色に変わって脈打つ「掴み」ボタンになる */
+#jump-btn .icon-grab { display: none; }
+#jump-btn.special { background: radial-gradient(circle at 50% 35%, #ffe27a, #ff9d00);
+  border-color: #fff; box-shadow: 0 4px 0 #a85f00, 0 0 0 6px rgba(255, 200, 60, 0.45), 0 0 24px 8px rgba(255, 190, 40, 0.8);
+  animation: grab-pulse 0.25s ease-in-out infinite alternate; }
+#jump-btn.special .icon-jump { display: none; }
+#jump-btn.special .icon-grab { display: block; width: 70%; height: 70%; }
+@keyframes grab-pulse { from { transform: scale(1.12); } to { transform: scale(1.28); } }
 
 #rotate-hint { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; text-align: center;
   background: rgba(20, 30, 45, 0.9); color: #fff; font: 600 18px/1.6 system-ui, sans-serif; }
@@ -67,11 +75,20 @@ const SWORD_SVG = `
 
 // ジャンプのアイコン（上向きの二重矢印）
 const JUMP_SVG = `
-<svg viewBox="0 0 64 64" aria-hidden="true" fill="none" stroke-linecap="round" stroke-linejoin="round">
+<svg class="icon-jump" viewBox="0 0 64 64" aria-hidden="true" fill="none" stroke-linecap="round" stroke-linejoin="round">
   <polyline points="14,34 32,14 50,34" stroke="#0a2f73" stroke-width="13"/>
   <polyline points="14,52 32,32 50,52" stroke="#0a2f73" stroke-width="13"/>
   <polyline points="14,34 32,14 50,34" stroke="#ffffff" stroke-width="7"/>
   <polyline points="14,52 32,32 50,52" stroke="#ffffff" stroke-width="7"/>
+</svg>`;
+
+// 掴みのアイコン（握りこぶし + 上向きの矢印）
+const GRAB_SVG = `
+<svg class="icon-grab" viewBox="0 0 64 64" aria-hidden="true" stroke-linejoin="round" stroke-linecap="round">
+  <path d="M18 60 V44 L12 36 V26 a4 4 0 0 1 8 0 V22 a4 4 0 0 1 8 0 V20 a4 4 0 0 1 8 0 V22 a4 4 0 0 1 8 0 V30 l4 -5 a4 4 0 0 1 6 5 L44 44 V60 Z"
+    fill="#fff" stroke="#6b3a00" stroke-width="4"/>
+  <path d="M20 26 V34 M28 22 V34 M36 22 V34" fill="none" stroke="#6b3a00" stroke-width="3"/>
+  <polyline points="22,12 32,3 42,12" fill="none" stroke="#6b3a00" stroke-width="5"/>
 </svg>`;
 
 export class TouchControls {
@@ -81,6 +98,7 @@ export class TouchControls {
     this.run = false;
     this.attack = false;
     this.jumpQueued = false; // ジャンプが押された（読み取られるまで保持）
+    this.special = false;
     this.enabled = false;
 
     const style = document.createElement('style');
@@ -92,7 +110,7 @@ export class TouchControls {
     this.root.className = 'hidden';
     this.root.innerHTML = `
       <div id="stick-zone"><div id="stick-base"><span id="run-label">RUN</span><div id="stick-knob"></div></div></div>
-      <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}</div>
+      <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}${GRAB_SVG}</div>
       <div id="attack-btn" role="button" aria-label="攻撃">${SWORD_SVG}</div>`;
     document.body.appendChild(this.root);
 
@@ -125,6 +143,7 @@ export class TouchControls {
     this.resize(); // 表示してから位置を計算する（非表示中は大きさが 0 のため）
     this.hint.classList.add('touch');
     document.getElementById('hud')?.classList.add('touch');
+    document.getElementById('combo-prompt')?.classList.add('touch');
   }
 
   // 画面の短い辺に合わせてスティックとボタンの大きさを決める
@@ -208,6 +227,14 @@ export class TouchControls {
       this.run = mag >= RUN_THRESHOLD;
     }
     this.base.classList.toggle('run', this.run);
+  }
+
+  // コンボ技を出せる間だけ、ジャンプボタンを「掴み」ボタンの見た目に変える
+  setSpecial(on) {
+    if (on === this.special) return;
+    this.special = on;
+    this.jumpBtn.classList.toggle('special', on);
+    if (on) navigator.vibrate?.(15);
   }
 
   // ジャンプが押されていたら true を返し、押された記録を消す（1回の押下で1回だけ跳ぶ）
