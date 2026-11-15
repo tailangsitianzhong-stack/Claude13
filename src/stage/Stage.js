@@ -49,7 +49,8 @@ export function createStage(options = {}) {
   const stones = [];
   const wallMid = half - cfg.wallThickness / 2; // 壁帯の中心線
   const perimeter = 8 * wallMid;
-  const step = 1.3;
+  const S = cfg.stoneScale;
+  const step = cfg.stoneStep;
   for (let d = 0; d < perimeter; d += step) {
     // 周回距離 d → 四角形の外周上の点 (x, z) と向き
     const sideIdx = Math.floor(d / (2 * wallMid));
@@ -61,17 +62,17 @@ export function createStage(options = {}) {
       [-wallMid, -t, Math.PI / 2],
     ][sideIdx];
 
-    let y = -0.3; // 少し床にめり込ませる
+    let y = -0.3 * S; // 少し床にめり込ませる
     while (y < cfg.wallHeight) {
-      const sx = r(1.4, 3.2);
-      const sy = r(0.9, 2.0);
-      const sz = r(1.2, cfg.wallThickness);
-      const off = r(-0.6, 0.6); // 壁の厚み方向のズレ
+      const sx = r(1.4, 3.2) * S;
+      const sy = r(0.9, 2.0) * S;
+      const sz = Math.min(r(1.2, 3) * S, cfg.wallThickness);
+      const off = r(-0.6, 0.6) * S; // 壁の厚み方向のズレ
       stones.push({
         pos: new THREE.Vector3(
-          x + (angle === 0 ? r(-0.4, 0.4) : off),
+          x + (angle === 0 ? r(-0.4, 0.4) * S : off),
           y + sy / 2,
-          z + (angle === 0 ? off : r(-0.4, 0.4)),
+          z + (angle === 0 ? off : r(-0.4, 0.4) * S),
         ),
         rot: new THREE.Euler(r(-0.2, 0.2), angle + r(-0.35, 0.35), r(-0.2, 0.2)),
         scale: new THREE.Vector3(sx, sy, sz),
@@ -106,7 +107,7 @@ export function createStage(options = {}) {
   sea.name = 'Sea';
   group.add(sea);
 
-  const inner = half - cfg.wallThickness - 0.5; // 石の張り出し分の余裕を引く
+  const inner = half - cfg.wallThickness - 0.5 * S; // 石の張り出し分の余裕を引く
   return {
     group,
     update() {},
