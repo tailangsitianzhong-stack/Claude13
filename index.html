@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Block Fighter - Stage</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #87c5ff; }
+      #hud {
+        position: fixed; left: 12px; top: 10px; color: #fff;
+        font: 13px/1.5 system-ui, sans-serif; text-shadow: 0 1px 2px #0008;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">ドラッグ: 回転 / ホイール: ズーム / 右ドラッグ: 移動</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
