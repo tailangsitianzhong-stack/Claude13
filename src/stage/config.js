@@ -1,11 +1,16 @@
-// ステージの寸法設定（単位: ブロック）
+// ステージの寸法設定（ワールド単位）
 export const STAGE_CONFIG = {
-  blockSize: 2,        // 1ブロックのワールドサイズ
-  floorBlocks: 16,     // 床の一辺のブロック数（外周1列が壁になる）
-  floorThickness: 2,   // 床（島）の厚み（ブロック数）
-  wallHeight: 3,       // 壁の高さ（ブロック数）
-  battlements: true,   // 壁の上に凸凹（胸壁）を付ける
+  floorSize: 32,       // 床（島）の一辺
+  floorThickness: 3,   // 床の厚み
+  wallThickness: 3,    // 石壁の帯の太さ（外周から内側へ）
+  wallHeight: 5,       // 石壁のおおよその高さ
   seaLevel: -1.2,      // 海面の高さ（床の上面が y=0）
-  seaSize: 400,        // 海の広さ
-  seed: 1337,          // テクスチャ・色ムラ用の乱数シード
+  seaSize: 600,        // 海の広さ
+  seed: 1337,          // 石の配置・色ムラ用の乱数シード
+  colors: {
+    grass: 0x4fa83d,
+    dirt: 0x7a5232,
+    stone: 0x8f8f8f,
+    sea: 0x2e7fd0,
+  },
 };

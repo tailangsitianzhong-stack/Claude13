@@ -1,127 +1,115 @@
 import * as THREE from 'three';
 import { STAGE_CONFIG } from './config.js';
-import {
-  mulberry32, grassTexture, dirtSideTexture, dirtTexture, stoneTexture, waterTexture,
-} from './textures.js';
+
+// 再現性のある乱数（シードが同じなら同じ壁になる）
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /**
  * 格闘ゲームの土台ステージ。
- * - 草原の床（島）
- * - その外周を石ブロックのみで囲う壁
- * - 外側は海
- * 返り値の `bounds` は壁の内側（キャラが動ける範囲, XZ）で、後で当たり判定に使う。
+ * - 草原の床（単色）
+ * - 外周を囲う、石ブロックが重なり合った乱雑な壁
+ * - 外側はのっぺりした海
+ * 返り値の `bounds` は壁の内側（キャラが動ける範囲, XZ）。
  */
 export function createStage(options = {}) {
-  const cfg = { ...STAGE_CONFIG, ...options };
-  const B = cfg.blockSize;
-  const N = cfg.floorBlocks;
-  const half = (N * B) / 2;
+  const cfg = { ...STAGE_CONFIG, ...options, colors: { ...STAGE_CONFIG.colors, ...options.colors } };
   const rand = mulberry32(cfg.seed);
+  const r = (min, max) => min + rand() * (max - min);
+  const half = cfg.floorSize / 2;
 
   const group = new THREE.Group();
   group.name = 'Stage';
 
   // ---------- 草原の床 ----------
-  const floorH = cfg.floorThickness * B;
-  const grassTop = grassTexture(cfg.seed + 1);
-  grassTop.repeat.set(N, N);
-  const side = dirtSideTexture(cfg.seed + 2);
-  side.repeat.set(N, cfg.floorThickness);
-  side.offset.y = 0;
-  const bottom = dirtTexture(cfg.seed + 3);
-  bottom.repeat.set(N, N);
-
-  const sideMat = new THREE.MeshLambertMaterial({ map: side });
+  const sideMat = new THREE.MeshStandardMaterial({ color: cfg.colors.dirt, roughness: 0.9 });
   const floor = new THREE.Mesh(
-    new THREE.BoxGeometry(N * B, floorH, N * B),
+    new THREE.BoxGeometry(cfg.floorSize, cfg.floorThickness, cfg.floorSize),
     [
-      sideMat, sideMat,                                   // +X, -X
-      new THREE.MeshLambertMaterial({ map: grassTop }),   // +Y (上面)
-      new THREE.MeshLambertMaterial({ map: bottom }),     // -Y
-      sideMat, sideMat,                                   // +Z, -Z
+      sideMat, sideMat,
+      new THREE.MeshStandardMaterial({ color: cfg.colors.grass, roughness: 0.85 }), // 上面
+      sideMat, sideMat, sideMat,
     ],
   );
-  floor.position.y = -floorH / 2; // 上面を y=0 に
+  floor.position.y = -cfg.floorThickness / 2; // 上面を y=0 に
   floor.receiveShadow = true;
   floor.name = 'GrassFloor';
   group.add(floor);
 
-  // ---------- 石ブロックの壁 ----------
-  const cells = [];
-  for (let i = 0; i < N; i++) {
-    for (let j = 0; j < N; j++) {
-      if (i === 0 || j === 0 || i === N - 1 || j === N - 1) cells.push([i, j]);
+  // ---------- 石ブロックの乱雑な壁 ----------
+  // 外周に沿って、大きさ・向き・傾きがバラバラな石ブロックを重ねて積む
+  const stones = [];
+  const wallMid = half - cfg.wallThickness / 2; // 壁帯の中心線
+  const perimeter = 8 * wallMid;
+  const step = 1.3;
+  for (let d = 0; d < perimeter; d += step) {
+    // 周回距離 d → 四角形の外周上の点 (x, z) と向き
+    const sideIdx = Math.floor(d / (2 * wallMid));
+    const t = (d % (2 * wallMid)) - wallMid;
+    const [x, z, angle] = [
+      [t, -wallMid, 0],
+      [wallMid, t, Math.PI / 2],
+      [-t, wallMid, 0],
+      [-wallMid, -t, Math.PI / 2],
+    ][sideIdx];
+
+    let y = -0.3; // 少し床にめり込ませる
+    while (y < cfg.wallHeight) {
+      const sx = r(1.4, 3.2);
+      const sy = r(0.9, 2.0);
+      const sz = r(1.2, cfg.wallThickness);
+      const off = r(-0.6, 0.6); // 壁の厚み方向のズレ
+      stones.push({
+        pos: new THREE.Vector3(
+          x + (angle === 0 ? r(-0.4, 0.4) : off),
+          y + sy / 2,
+          z + (angle === 0 ? off : r(-0.4, 0.4)),
+        ),
+        rot: new THREE.Euler(r(-0.2, 0.2), angle + r(-0.35, 0.35), r(-0.2, 0.2)),
+        scale: new THREE.Vector3(sx, sy, sz),
+      });
+      y += sy * r(0.55, 0.8); // 下の石と重なるように積む
     }
   }
-  const positions = [];
-  for (const [i, j] of cells) {
-    for (let h = 0; h < cfg.wallHeight; h++) positions.push([i, h, j]);
-    // 胸壁: 1つおきに1段高く（四隅は必ず高く）
-    const corner = (i === 0 || i === N - 1) && (j === 0 || j === N - 1);
-    if (cfg.battlements && (corner || (i + j) % 2 === 0)) positions.push([i, cfg.wallHeight, j]);
-  }
 
-  const stoneMat = new THREE.MeshLambertMaterial({ map: stoneTexture(cfg.seed + 4) });
-  const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(B, B, B), stoneMat, positions.length);
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
+  const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), stoneMat, stones.length);
   walls.name = 'StoneWalls';
   const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const base = new THREE.Color(cfg.colors.stone);
   const c = new THREE.Color();
-  positions.forEach(([i, h, j], k) => {
-    m.makeTranslation(-half + B / 2 + i * B, B / 2 + h * B, -half + B / 2 + j * B);
+  stones.forEach((s, k) => {
+    m.compose(s.pos, q.setFromEuler(s.rot), s.scale);
     walls.setMatrixAt(k, m);
-    // ロブロックス風にブロックごとに少しだけ明るさを変える
-    const v = 0.85 + rand() * 0.2;
-    walls.setColorAt(k, c.setRGB(v, v, v));
+    walls.setColorAt(k, c.copy(base).multiplyScalar(r(0.75, 1.1))); // 石ごとの濃淡
   });
   walls.castShadow = true;
   walls.receiveShadow = true;
   group.add(walls);
 
-  // ---------- 海 ----------
-  const seaTex = waterTexture(cfg.seed + 5);
-  const tiles = cfg.seaSize / B;
-  seaTex.repeat.set(tiles, tiles);
-  const segs = 80;
-  const seaGeo = new THREE.PlaneGeometry(cfg.seaSize, cfg.seaSize, segs, segs);
-  seaGeo.rotateX(-Math.PI / 2);
+  // ---------- 海（のっぺり単色） ----------
   const sea = new THREE.Mesh(
-    seaGeo,
-    new THREE.MeshLambertMaterial({ map: seaTex, transparent: true, opacity: 0.9, flatShading: true }),
+    new THREE.PlaneGeometry(cfg.seaSize, cfg.seaSize).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({ color: cfg.colors.sea, roughness: 0.4 }),
   );
   sea.position.y = cfg.seaLevel;
   sea.receiveShadow = true;
   sea.name = 'Sea';
   group.add(sea);
 
-  const seaPos = seaGeo.attributes.position;
-  const baseX = Float32Array.from({ length: seaPos.count }, (_, k) => seaPos.getX(k));
-  const baseZ = Float32Array.from({ length: seaPos.count }, (_, k) => seaPos.getZ(k));
-
-  // 海の底（島の下が透けて見えすぎないように暗い面）
-  const seabed = new THREE.Mesh(
-    new THREE.PlaneGeometry(cfg.seaSize, cfg.seaSize).rotateX(-Math.PI / 2),
-    new THREE.MeshLambertMaterial({ color: 0x1b4f7a }),
-  );
-  seabed.position.y = -floorH - 0.01;
-  group.add(seabed);
-
-  function update(time) {
-    // 低ポリの波（頂点を上下）＋テクスチャをゆっくり流す
-    for (let k = 0; k < seaPos.count; k++) {
-      const x = baseX[k];
-      const z = baseZ[k];
-      const y = Math.sin(x * 0.15 + time * 1.2) * 0.18 + Math.cos(z * 0.12 + time * 0.9) * 0.18;
-      seaPos.setY(k, y);
-    }
-    seaPos.needsUpdate = true;
-    seaGeo.computeVertexNormals();
-    seaTex.offset.set(time * 0.02, time * 0.01);
-  }
-
-  const inner = half - B; // 壁の内側
+  const inner = half - cfg.wallThickness - 0.5; // 石の張り出し分の余裕を引く
   return {
     group,
-    update,
+    update() {},
     config: cfg,
     bounds: { minX: -inner, maxX: inner, minZ: -inner, maxZ: inner, floorY: 0 },
   };
