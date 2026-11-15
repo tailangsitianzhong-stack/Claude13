@@ -15,6 +15,12 @@ npm run dev
 - **石の壁**: 外周に、大きさ・向き・傾きがバラバラな石ブロックを重ねて積んだ乱雑な壁
 - **海**: 外側一面の単色の平面
 
+### 公開（GitHub Pages など）
+
+ビルドなしで、リポジトリの中身をそのまま配信しても動く。`index.html` が同梱の
+`vendor/three.module.min.js` を import map で読み込むため（Safari は 16.4 以降）。
+`npm run build` した `dist` を配信してもよい。
+
 ## 操作
 
 | キー | 動き |
