@@ -554,6 +554,23 @@ const A3 = [
   } },
 ];
 
+// --- 空中攻撃: 叩きつけ ---
+// 空中で剣を頭上へ振りかぶり（attackT 0）、切っ先を下にして真下へ突っ込む（attackT 1）。
+// 着地後は attack3 の着地〜残心の部分へつながる
+const AIR_SLAM = [
+  { t: 0, pose: (o) => { A3[2].pose(o); o.lift = 0; o.ground = 0; } },
+  { t: 1, ease: 'in', pose: (o) => {
+    o.ground = 0;
+    o.hipsPitch = 0.35; o.waistPitch = 0.5; o.neckPitch = -0.5;
+    o.lHipSwing = -0.3; o.lKnee = 0.9; o.lHipOut = 0.1; o.lAnkle = -0.4;
+    o.rHipSwing = 0.25; o.rKnee = 1.1; o.rHipOut = 0.1; o.rAnkle = -0.4;
+    o.rShoulderSwing = 1.5; o.rShoulderOut = 0.0; o.rShoulderTwist = 0.25; o.rElbow = 0.15;
+    o.swordTilt = 1.95;
+    o.lShoulderSwing = 1.4; o.lShoulderOut = -0.15; o.lShoulderTwist = 0.6; o.lElbow = 0.4;
+  } },
+];
+const airSlam = (ctx, o) => keyed(ctx.attackT, AIR_SLAM, o);
+
 const attack1 = (ctx, o) => keyed(ctx.attackT, A1, o);
 const attack2 = (ctx, o) => keyed(ctx.attackT, A2, o);
 const attack3 = (ctx, o) => keyed(ctx.attackT, A3, o);
@@ -575,4 +592,4 @@ function hit(ctx, o) {
   o.swordTilt = 0.8;
 }
 
-export const POSES = { stand, fight, walk, run, crouch, air, land, attack1, attack2, attack3, hit };
+export const POSES = { stand, fight, walk, run, crouch, air, land, attack1, attack2, attack3, airSlam, hit };

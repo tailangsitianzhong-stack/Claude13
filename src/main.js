@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
-import { CharacterController, ATTACKS } from './character/Controller.js';
+import { CharacterController, ATTACKS, AIR_SLAM } from './character/Controller.js';
 import { input } from './input.js';
 import { TouchControls } from './ui/TouchControls.js';
 import { CameraFx } from './camera/CameraFx.js';
@@ -87,7 +87,7 @@ function readCommand() {
   return {
     x, z,
     run: input.isDown('ShiftLeft', 'ShiftRight') || touch.run,
-    jump: input.wasPressed('Space'),
+    jump: input.wasPressed('Space') || touch.takeJump(),
     attack: input.isDown('KeyJ', 'Mouse0') || touch.attack,
     toggleStance: input.wasPressed('KeyF'),
   };
@@ -115,7 +115,12 @@ function toCameraSpace(character, [x, y, z]) {
 // 攻撃の節目ごとのカメラ演出
 function onAttackEvent(e) {
   const d = toCameraSpace(p1, SLASH_DIR[e.index]);
-  if (e.type === 'attackStart' && e.index === 2) {
+  if (e.type === 'airSlamStart') {
+    fx.zoom(70);           // 空中でためる間、少し引く
+    fx.kick(0, 0.6, 0);
+  } else if (e.type === 'airSlamLand') {
+    airSlamImpact();
+  } else if (e.type === 'attackStart' && e.index === 2) {
     fx.zoom(55);          // 跳び上がりで少し引く
     fx.kick(0, 0.5, 0);
   } else if (e.type === 'swing') {
@@ -138,6 +143,44 @@ function onAttackEvent(e) {
     forward.set(0, 0, 0);
     sparks.burst(v1, forward, 14, p1.height * 0.07, p1.height * 1.6, 0.25, 0.25);
   }
+}
+
+// 空中攻撃の着地: 剣が叩いた地点を中心に、まわりの相手をまとめて吹き飛ばす範囲攻撃
+function airSlamImpact() {
+  const h = p1.group.rotation.y;
+  const S = p1.scale;
+  const cx = p1.group.position.x + Math.sin(h) * AIR_SLAM.reach * S;
+  const cz = p1.group.position.z + Math.cos(h) * AIR_SLAM.reach * S;
+  const radius = AIR_SLAM.radius * S;
+
+  // 地面: 範囲いっぱいに広がる衝撃波の輪を重ね、土煙と光の粒を巻き上げる
+  v1.set(cx, 0.03, cz);
+  impact.ring(v1, radius, 0.5);
+  impact.ring(v1, radius * 0.65, 0.38);
+  impact.ring(v1, radius * 0.35, 0.26);
+  impact.flash(v1.setY(p1.height * 0.25), p1.height * 2.4, 0.18);
+  forward.set(0, 0, 0);
+  sparks.burst(v1, forward, 20, p1.height * 0.075, p1.height * 2.2, 0.25, 0.25);
+  sparks.burst(v1, forward, 12, p1.height * 0.05, p1.height * 3.4, 0.53, 0.9);
+  fx.shake(0.6);
+  fx.kick(0, -1.1, 0);
+  fx.zoom(-90);
+
+  // 範囲内の相手に命中（中心から外へ吹き飛ばす）
+  const dx = p2.group.position.x - cx;
+  const dz = p2.group.position.z - cz;
+  if (Math.hypot(dx, dz) > radius) return;
+  const ox = p2.group.position.x - p1.group.position.x;
+  const oz = p2.group.position.z - p1.group.position.z;
+  dummy.hit(ox, oz, 2);
+  hitStop = 0.14;
+  flash = 0.14;
+  fx.shake(0.4);
+  fx.zoom(-120);
+  v1.set(p2.group.position.x, p2.height * 0.55, p2.group.position.z);
+  forward.set(ox, 0, oz).normalize();
+  sparks.burst(v1, forward, 16, p2.height * 0.065, p2.height * 3.2);
+  impact.flash(v1, p2.height * 2.4, 0.2);
 }
 
 // 剣が当たったか: 刃（根元〜先端）が相手の体の幅まで近づいた瞬間に命中とする。

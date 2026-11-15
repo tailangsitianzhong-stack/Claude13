@@ -1,6 +1,6 @@
 // スマホ横画面用の操作UI。
 //  - 左半分: 触れた場所に出るスティック。倒した量で歩く速さが変わり、外周まで倒し切ると走る
-//  - 右下  : 攻撃ボタン（押している間は連続斬り）
+//  - 右下  : 攻撃ボタン（押している間は連続斬り）と、その左に一回り小さいジャンプボタン
 // 画面のそれ以外の場所（右上側）をドラッグするとカメラが回る（OrbitControls が担当）。
 
 const RUN_THRESHOLD = 0.92; // これ以上倒すと走る
@@ -37,6 +37,17 @@ const CSS = `
 #attack-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(90, 10, 5, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
 #attack-btn svg { width: 56%; height: 56%; }
 
+/* ジャンプ: 攻撃ボタンの左に、一回り小さく */
+#jump-btn { position: absolute; width: var(--btn2); height: var(--btn2);
+  right: calc(28px + env(safe-area-inset-right) + var(--btn) + 16px); bottom: calc(26px + env(safe-area-inset-bottom));
+  border-radius: 50%; pointer-events: auto; touch-action: none;
+  background: radial-gradient(circle at 50% 35%, rgba(90, 170, 255, 0.95), rgba(30, 100, 210, 0.95));
+  border: 4px solid rgba(255, 255, 255, 0.85); box-sizing: border-box;
+  box-shadow: 0 4px 0 rgba(5, 40, 110, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3);
+  display: grid; place-items: center; transition: transform 0.05s, box-shadow 0.05s; }
+#jump-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(5, 40, 110, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
+#jump-btn svg { width: 54%; height: 54%; }
+
 #rotate-hint { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; text-align: center;
   background: rgba(20, 30, 45, 0.9); color: #fff; font: 600 18px/1.6 system-ui, sans-serif; }
 @media (orientation: portrait) { #rotate-hint.touch { display: grid; } }
@@ -54,12 +65,22 @@ const SWORD_SVG = `
   </g>
 </svg>`;
 
+// ジャンプのアイコン（上向きの二重矢印）
+const JUMP_SVG = `
+<svg viewBox="0 0 64 64" aria-hidden="true" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <polyline points="14,34 32,14 50,34" stroke="#0a2f73" stroke-width="13"/>
+  <polyline points="14,52 32,32 50,52" stroke="#0a2f73" stroke-width="13"/>
+  <polyline points="14,34 32,14 50,34" stroke="#ffffff" stroke-width="7"/>
+  <polyline points="14,52 32,32 50,52" stroke="#ffffff" stroke-width="7"/>
+</svg>`;
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
     this.y = 0;        // スティックの縦（上 = 前 +）
     this.run = false;
     this.attack = false;
+    this.jumpQueued = false; // ジャンプが押された（読み取られるまで保持）
     this.enabled = false;
 
     const style = document.createElement('style');
@@ -71,6 +92,7 @@ export class TouchControls {
     this.root.className = 'hidden';
     this.root.innerHTML = `
       <div id="stick-zone"><div id="stick-base"><span id="run-label">RUN</span><div id="stick-knob"></div></div></div>
+      <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}</div>
       <div id="attack-btn" role="button" aria-label="攻撃">${SWORD_SVG}</div>`;
     document.body.appendChild(this.root);
 
@@ -83,11 +105,13 @@ export class TouchControls {
     this.base = this.root.querySelector('#stick-base');
     this.knob = this.root.querySelector('#stick-knob');
     this.btn = this.root.querySelector('#attack-btn');
+    this.jumpBtn = this.root.querySelector('#jump-btn');
 
     this.resize();
     addEventListener('resize', () => this.resize());
     this.bindStick();
     this.bindButton();
+    this.bindJump();
 
     // タッチ操作の端末なら表示。PC でも画面に触れたら表示に切り替える
     if (matchMedia('(pointer: coarse)').matches) this.enable();
@@ -108,7 +132,9 @@ export class TouchControls {
     const short = Math.min(innerWidth, innerHeight);
     this.stickSize = Math.round(Math.max(110, Math.min(170, short * 0.36)));
     this.root.style.setProperty('--stick', `${this.stickSize}px`);
-    this.root.style.setProperty('--btn', `${Math.round(Math.max(84, Math.min(130, short * 0.27)))}px`);
+    const btn = Math.round(Math.max(84, Math.min(130, short * 0.27)));
+    this.root.style.setProperty('--btn', `${btn}px`);
+    this.root.style.setProperty('--btn2', `${Math.round(btn * 0.76)}px`);
     this.restPos();
   }
 
@@ -182,6 +208,29 @@ export class TouchControls {
       this.run = mag >= RUN_THRESHOLD;
     }
     this.base.classList.toggle('run', this.run);
+  }
+
+  // ジャンプが押されていたら true を返し、押された記録を消す（1回の押下で1回だけ跳ぶ）
+  takeJump() {
+    const j = this.jumpQueued;
+    this.jumpQueued = false;
+    return j;
+  }
+
+  bindJump() {
+    const ids = new Set();
+    this.jumpBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      ids.add(e.pointerId);
+      this.jumpBtn.setPointerCapture(e.pointerId);
+      this.jumpQueued = true;
+      this.jumpBtn.classList.add('pressed');
+      navigator.vibrate?.(8);
+    });
+    const end = (e) => { ids.delete(e.pointerId); if (ids.size === 0) this.jumpBtn.classList.remove('pressed'); };
+    this.jumpBtn.addEventListener('pointerup', end);
+    this.jumpBtn.addEventListener('pointercancel', end);
+    this.jumpBtn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   bindButton() {

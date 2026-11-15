@@ -28,6 +28,14 @@ export const ATTACKS = [
   { anim: 'attack3', duration: 0.68, active: [0.5, 0.71], chain: 0.86, lunge: [0.24, 0.58, 14], power: 2 },
 ];
 export const IDEAL_RANGE = 4.9; // 踏み込みで詰める間合い（リグ単位）。これより近づかない
+// 空中攻撃（叩きつけ）。ジャンプ中に攻撃を押すと、一瞬ためてから真下へ急降下し、着地点のまわりを攻撃する
+export const AIR_SLAM = {
+  minHeight: 0.8,   // これより低いと出せない（リグ単位）
+  windup: 0.16,     // 空中で振りかぶる時間（秒）。この間はほぼ落ちない
+  diveSpeed: 34,    // 急降下の速さ（リグ単位/秒）
+  radius: 7,        // 着地時の攻撃範囲の半径（リグ単位）
+  reach: 2.2,       // 範囲の中心はキャラの前方これだけ先（剣が地面を叩く位置）
+};
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
 
 const TWO_PI = Math.PI * 2;
@@ -44,10 +52,12 @@ export class CharacterController {
     this.vx = 0;
     this.vz = 0;
     this.vy = 0;
-    this.state = 'ground'; // 'ground' | 'crouch' | 'air' | 'land' | 'attack' | 'hit'
+    this.state = 'ground'; // 'ground' | 'crouch' | 'air' | 'land' | 'attack' | 'airSlam' | 'hit'
     this.timer = 0;
     this.idle = 'stand';   // 止まっているときのポーズ: 'stand' | 'fight'
     this.jumpBuffer = 0;
+    this.prevAttack = false;  // 前フレームに攻撃が押されていたか（押した瞬間の検出用）
+    this.slamT = 0;
 
     this.target = null;       // 攻撃時に自動で向く相手（Character）
     this.attackIndex = 0;     // 今出している攻撃の番号
@@ -109,6 +119,8 @@ export class CharacterController {
       this.idle = this.idle === 'stand' ? 'fight' : 'stand';
     }
     this.jumpBuffer = cmd.jump ? 0.12 : Math.max(0, this.jumpBuffer - dt); // 着地直前の入力も拾う
+    const attackPressed = cmd.attack && !this.prevAttack;
+    this.prevAttack = cmd.attack;
 
     // ---- 水平移動 ----
     const control = this.state === 'air' ? MOVE.airControl : this.state === 'ground' ? 1 : 0.5;
@@ -135,6 +147,10 @@ export class CharacterController {
       tx = Math.sin(group.rotation.y) * v;
       tz = Math.cos(group.rotation.y) * v;
       rate = 160 * S * dt;
+    } else if (this.state === 'airSlam') {
+      tx = 0;
+      tz = 0;
+      rate = 40 * S * dt; // 横の勢いを殺して、ほぼ真下へ落ちる
     } else if (this.state === 'hit') {
       tx = 0;
       tz = 0;
@@ -207,12 +223,54 @@ export class CharacterController {
         group.position.y += this.vy * dt;
         const v0 = Math.sqrt(2 * MOVE.gravity * MOVE.jumpHeight) * S;
         animator.airU = this.vy / v0;
-        if (group.position.y <= 0 && this.vy < 0) {
+        if (attackPressed && this.c.sword && group.position.y > AIR_SLAM.minHeight * S) {
+          // 空中攻撃: 近くに相手がいればそちらを向き、剣を振りかぶる
+          this.state = 'airSlam';
+          this.slamT = 0;
+          this.vy = Math.max(this.vy * 0.3, 3 * S);
+          if (this.target) {
+            const dx = this.target.group.position.x - group.position.x;
+            const dz = this.target.group.position.z - group.position.z;
+            if (Math.hypot(dx, dz) < AIM_ASSIST.range * S) group.rotation.y = Math.atan2(dx, dz);
+          }
+          animator.attackT = 0;
+          animator.play('airSlam', 0.06);
+          this.events.push({ type: 'airSlamStart', index: 2 });
+        } else if (group.position.y <= 0 && this.vy < 0) {
           group.position.y = 0;
           this.vy = 0;
           this.state = 'land';
           this.timer = moving ? MOVE.landTime * 0.6 : MOVE.landTime; // 走りながらなら素早く立て直す
           animator.play('land', 0.06);
+        }
+        break;
+      }
+      case 'airSlam': {
+        this.slamT += dt;
+        if (this.slamT < AIR_SLAM.windup) {
+          this.vy -= MOVE.gravity * 0.2 * S * dt; // ためている間はふわっと浮く
+        } else {
+          this.vy = -AIR_SLAM.diveSpeed * S;      // 一気に急降下
+        }
+        group.position.y += this.vy * dt;
+        animator.attackT = Math.min(1, this.slamT / (AIR_SLAM.windup + 0.06));
+        animator.trailOn = this.slamT >= AIR_SLAM.windup;
+        if (group.position.y <= 0) {
+          group.position.y = 0;
+          this.vy = 0;
+          this.vx = 0;
+          this.vz = 0;
+          // 着地: 兜割りの「着地〜残心」へつなぐ（そのまま地上の連続斬りにも入れる）
+          this.state = 'attack';
+          this.attackIndex = 2;
+          this.attackT = 0.72;
+          this.attackActive = false;
+          this.hitDone = true;
+          this.aimYaw = group.rotation.y;
+          animator.attackT = this.attackT;
+          animator.trailOn = false;
+          animator.play('attack3', 0.05);
+          this.events.push({ type: 'airSlamLand', index: 2 });
         }
         break;
       }

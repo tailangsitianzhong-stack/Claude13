@@ -227,7 +227,7 @@ export function createCharacter(options = {}) {
     if (trail) trail.update(dt);
     if (sword) {
       // 斬撃のオーラ: 振りかぶりで灯り、斬っている間は全開、終わるとすっと消える
-      const want = animator.trailOn ? 1 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
+      const want = animator.trailOn ? 1 : animator.name === 'airSlam' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
       auraLevel += (want - auraLevel) * (1 - Math.exp(-(want > auraLevel ? 30 : 9) * dt));
       auraTime += dt;
       sword.userData.setAura(animator.debug ? (animator.debug.aura ?? 0) : auraLevel, auraTime);
