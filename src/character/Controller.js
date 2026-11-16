@@ -592,17 +592,29 @@ export class CharacterController {
       if (u.released && !u.hit) {
         u.fly.t += dt;
         const k = Math.min(1, u.fly.t / ULT.flight);
-        _b.set(vg.position.x, vg.position.y + 3.3 * S, vg.position.z); // 相手の胸
-        _c.subVectors(_b, u.fly.from);
-        const len = _c.length() || 1;
-        _a.copy(u.fly.from).addScaledVector(_c, k * (1 - 0.1 / len)); // 胸の手前で止まる
-        this.placeSword(_a, _c.x, _c.y, _c.z, u.fly.t * 34, dagger);
+        // 狙う点: 相手の胸の正面（体の表面）。のけぞりなどで姿勢が変わっても、毎回同じ位置になるよう
+        // 相手の向きと位置だけから決める（関節の位置は使わない）
+        const chestH = 3.0 * S;
+        _b.set(vg.position.x, vg.position.y + chestH, vg.position.z);
+        _c.subVectors(_b, u.fly.from).setY(0).normalize(); // 飛んでくる水平の向き（P1 → 相手）
+        u.fly.dir = u.fly.dir ?? _c.clone();
+        const dirH = u.fly.dir;
+        // 体の表面（胸の厚みの手前）で止まる。刃は水平。柄が手前、切っ先が胸へ向く
+        _d.copy(_b).addScaledVector(dirH, -0.52 * S);
+        _c.set(_d.x - u.fly.from.x, _d.y - u.fly.from.y, _d.z - u.fly.from.z);
+        _a.copy(u.fly.from).addScaledVector(_c, k);
+        // 飛んでいる間は縦に回転。着く直前には回転を止めて、水平な向きに揃える
+        const spin = (1 - k) * (1 - k) * u.fly.t * 40;
+        this.placeSword(_a, _c.x, _c.y, _c.z, spin, dagger);
         if (k >= 1) {
-          // 命中: 小剣が胸に刺さる
+          // 命中: 胸の正面に水平に刺さる。向きは「相手→自分」の線に沿って固定（柄が自分の側）
           u.hit = true;
           u.phase = 'freeze';
           u.t = 0;
-          v.c.joints.waist.attach(dagger);
+          u.stuckDir = dirH.clone();
+          this.placeSword(_d, dirH.x, 0, dirH.z, 0, dagger);
+          // 相手の体（関節ではなく、位置と向きだけの親）に付ける。のけぞりや揺れのポーズに引きずられず、毎回同じ位置に刺さる
+          vg.attach(dagger);
           v.state = 'held';
           v.vx = v.vz = v.vy = 0;
           v.attackActive = false;

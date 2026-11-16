@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 
-// 対戦の表示: 画面上部の HP バー（左が自分、右が相手）、自分の必殺技ゲージ、ダメージ数字、KO などの大きな文字。
+// 対戦の表示: 画面上部の自分の HP バー（相手の HP は表示しない）、自分の必殺技ゲージ、ダメージ数字、KO などの大きな文字。
 
 const CSS = `
 #fight-hud { position: fixed; top: 30px; left: 0; right: 0; z-index: 6; display: flex; gap: 10px; padding: 0 max(12px, env(safe-area-inset-left)) 0 max(12px, env(safe-area-inset-right));
   pointer-events: none; font: 700 12px/1 system-ui, sans-serif; color: #fff; transition: opacity 0.2s; }
-#fight-hud .side { flex: 1; min-width: 0; }
+#fight-hud .side { flex: 0 1 min(46%, 380px); min-width: 0; }
 #fight-hud .mid { align-self: flex-start; padding: 2px 8px; border-radius: 6px; background: rgba(20,24,40,0.75); font-size: 11px; letter-spacing: 1px; }
 #fight-hud .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; text-shadow: 0 1px 2px #000a; }
 #fight-hud .right .top { flex-direction: row-reverse; }
@@ -35,6 +35,7 @@ const CSS = `
 #fight-banner.show { animation: banner-pop 1.6s ease-out forwards; }
 #fight-banner small { display: block; margin-top: 10px; font-size: 18px; -webkit-text-stroke: 0; color: #fff; letter-spacing: 2px; text-shadow: 0 2px 4px #000a; }
 @keyframes banner-pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.95); } }
+body.pre-match #fight-hud, body.pre-match #status-hud, body.pre-match #touch-ui, body.pre-match #hud, body.pre-match #combo-prompt, body.pre-match #ult-prompt { visibility: hidden; }
 body.cine-on #dmg-layer .dmg { font-size: 15px; -webkit-text-stroke: 3px #04203d; opacity: 0.9; }
 body.cine-on #dmg-layer .dmg.big { font-size: 20px; }
 body.cine-on #dmg-layer .dmg.huge { font-size: 34px; }
@@ -57,11 +58,8 @@ export class FightHud {
         <div class="hp"><i class="ghost"></i><i class="fill"></i></div>
         <div class="gauge"><i></i></div><div class="glabel"></div>
       </div>
-      <div class="mid">VS</div>
-      <div class="side right">
-        <div class="top"><span class="name">P2</span><span class="num"></span></div>
-        <div class="hp"><i class="ghost"></i><i class="fill"></i></div>
-      </div>`;
+      `;
+    // 相手の HP は表示しない（内部では Health が数えていて、KO や必殺技の判定には使う）
     document.body.appendChild(this.root);
 
     this.layer = document.createElement('div');
@@ -73,9 +71,7 @@ export class FightHud {
 
     const q = (s) => this.root.querySelector(s);
     this.l = { fill: q('.left .fill'), ghost: q('.left .ghost'), num: q('.left .num'), hp: q('.left .hp'), gauge: q('.gauge'), gaugeFill: q('.gauge i'), label: q('.glabel') };
-    this.r = { fill: q('.right .fill'), ghost: q('.right .ghost'), num: q('.right .num'), hp: q('.right .hp') };
     this.ghostL = 1;
-    this.ghostR = 1;
     this.pops = [];
     this.lastFull = false;
   }
@@ -93,7 +89,6 @@ export class FightHud {
       side.hp.classList.toggle('low', r < 0.3);
     };
     set(this.l, me.health, 'ghostL');
-    set(this.r, foe.health, 'ghostR');
     const g = me.gauge;
     this.l.gaugeFill.style.transform = `scaleX(${g.ratio.toFixed(4)})`;
     this.l.gauge.classList.toggle('full', g.full);

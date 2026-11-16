@@ -4,6 +4,8 @@ import { createCharacter } from './character/Character.js';
 import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4, ultPath } from './character/Controller.js';
 import { FIGHT, DAMAGE } from './character/Health.js';
 import { FightHud } from './ui/FightHud.js';
+import { WeaponSelect } from './ui/WeaponSelect.js';
+import { getWeapon } from './game/weapons.js';
 import { CineOverlay } from './cinematic/CineOverlay.js';
 import { UltimateDirector } from './cinematic/UltimateDirector.js';
 import { input } from './input.js';
@@ -704,8 +706,22 @@ const ultDirector = new UltimateDirector({
   },
 });
 
+// ---- 試合前の武器選択 ----
+// 選んだ武器は game.weapon に入る。今は「剣」だけ（ほかの武器はあとから追加する）
+let started = false;
+let weapon = getWeapon();
+const weaponSelect = new WeaponSelect((id) => {
+  weapon = getWeapon(id);
+  started = true;
+  document.body.classList.remove('pre-match');
+  fightHud.showBanner('READY', 'FIGHT!');
+  window.game.weapon = weapon;
+});
+// 試合前は、HP・ボタンなどの表示を隠す
+document.body.classList.add('pre-match');
+
 // デバッグ用
-window.game = { ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
+window.game = { start: () => weaponSelect.confirm(), isStarted: () => started, weapon, ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -717,6 +733,13 @@ addEventListener('resize', () => {
 function step(realDt) {
   // ヒットストップ中はゲーム内の時間だけほぼ止める（カメラ演出は実時間で動く）
   let dt = realDt;
+  if (!started) { // 武器選択中は、試合を進めない（ステージとカメラだけ表示する）
+    stage.update(clock.elapsedTime);
+    view.update(realDt, p1.group.position, null);
+    for (const c of characters) c.update(0);
+    if (!window.game.skipRender) renderer.render(scene, camera);
+    return;
+  }
   if (hitStop > 0) {
     hitStop -= realDt;
     dt *= 0.03;
