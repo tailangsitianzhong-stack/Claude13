@@ -1820,7 +1820,163 @@ const lookAround = (ctx, o) => {
   bset(o, { hipsX: 0.05 * sin(t * 2.6) });
 };
 
+// ============================================================
+// 矢印（素手。矢印のステッカーを貼って戦う）用のポーズ
+// ============================================================
+const armR = (o, swing, out, twist, elbow) => { o.rShoulderSwing = swing; o.rShoulderOut = out; o.rShoulderTwist = twist; o.rElbow = elbow; };
+const armL = (o, swing, out, twist, elbow) => { o.lShoulderSwing = swing; o.lShoulderOut = out; o.lShoulderTwist = twist; o.lElbow = elbow; };
+// ボクサーの構え: 拳をあごの前へ
+const aGuard = (o) => { FSTANCE(o); bset(o, { waistPitch: 0.1, neckPitch: -0.05 }); armR(o, 1.25, 0.25, 0.1, 1.9); armL(o, 1.35, 0.3, 0.1, 1.9); };
+
+// 持ち歩き: 素手。構えでは拳をあごの前へ（ゆらゆらステップ）
+export function carryArrow(name, ctx, o) {
+  const t = ctx.time;
+  switch (name) {
+    case 'stand':
+      armR(o, 0.1 + (o.rShoulderSwing - 0.03) * 0.5, 0.18, 0.0, 0.3);
+      armL(o, 0.1 + (o.lShoulderSwing + 0.03) * 0.5, 0.18, 0.0, 0.3);
+      break;
+    case 'fight': {
+      const b = sin(t * 5);
+      aGuard(o);
+      o.hipsX = 0.02 * b; o.hipsRoll = 0.03 * b; o.lKnee += 0.05 * b; o.rKnee -= 0.05 * b;
+      o.rShoulderSwing += 0.06 * sin(t * 5 + 1); o.lShoulderSwing += 0.06 * sin(t * 5 + 2.5);
+      break;
+    }
+    default: break;
+  }
+}
+
+// ---- 通常1: 右腕に加速の矢印を貼って、全体重の右ストレート。0.5 で当たる ----
+const ARW1 = [
+  { t: 0, pose: aGuard },
+  { t: 0.2, ease: 'inout', pose: (o) => { // 左手で、右の前腕に矢印をぺたり
+    FSTANCE(o); bset(o, { waistYaw: -0.3, hipsYaw: -0.15, neckYaw: 0.4, waistPitch: 0.2, lKnee: 0.8, rKnee: 0.7 });
+    armR(o, 1.0, 0.3, 0.2, 1.2); armL(o, 1.0, -0.9, 0.7, 1.5);
+  } },
+  { t: 0.38, ease: 'inout', pose: (o) => { // 体をひねって、右腕を大きく引く（矢印が光る）
+    FSTANCE(o); bset(o, { hipsYaw: -0.7, waistYaw: -0.8, neckYaw: 1.0, hipsZ: -0.1, waistPitch: 0.15, lKnee: 0.95, rKnee: 0.8, lHipSwing: 0.4 });
+    armR(o, 0.5, 0.6, 0.2, 1.8); armL(o, 1.3, 0.1, 0.1, 1.0);
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => { // 腰の回転から、一気に右ストレート
+    FSTANCE(o); bset(o, { hipsYaw: 0.5, waistYaw: 0.55, neckYaw: -0.3, hipsZ: 0.28, hipsPitch: 0.2, waistPitch: 0.4, lHipSwing: 0.95, lKnee: 0.5, rHipSwing: -0.5, rKnee: 0.5, rFlat: 0.3 });
+    armR(o, 1.55, 0.0, 0.2, 0.08); armL(o, 0.9, 0.3, 0.1, 2.0);
+  } },
+  { t: 0.7, ease: 'out', pose: (o) => { // 振り抜いた余韻
+    FSTANCE(o); bset(o, { hipsYaw: 0.7, waistYaw: 0.7, neckYaw: -0.45, hipsZ: 0.3, hipsPitch: 0.22, waistPitch: 0.45, lHipSwing: 1.0, lKnee: 0.55, rHipSwing: -0.55, rKnee: 0.55, rFlat: 0.3 });
+    armR(o, 1.5, 0.0, 0.2, 0.15); armL(o, 0.9, 0.3, 0.1, 2.0);
+  } },
+  { t: 1, ease: 'out', pose: aGuard },
+];
+const attackA1 = (ctx, o) => keyed(ctx.attackT, ARW1, o);
+
+// ---- 通常2: 床に加速の矢印を貼り（かがんで右手でぺたり）、猛ダッシュから飛び蹴り。0.62 で蹴りが当たる ----
+const ARW2 = [
+  { t: 0, pose: aGuard },
+  { t: 0.2, ease: 'out', pose: (o) => { // かがんで、右手を床へ
+    FSTANCE(o); bset(o, { hipsPitch: 0.3, waistPitch: 0.95, neckPitch: -0.3, lKnee: 1.2, rKnee: 1.1, lHipSwing: 0.7, rHipSwing: 0.2 });
+    armR(o, 1.05, 0.15, 0.0, 0.2); armL(o, 0.5, 0.3, 0.0, 0.6);
+  } },
+  { t: 0.32, ease: 'in', pose: (o) => { // 走り出し: 前のめりに、腕を後ろへ
+    FSTANCE(o); bset(o, { hipsPitch: 0.45, waistPitch: 0.55, neckPitch: -0.4, hipsZ: 0.2, lHipSwing: 1.0, lKnee: 1.0, rHipSwing: -0.8, rKnee: 0.5, rFlat: 0.2 });
+    armR(o, -0.9, 0.2, 0.0, 0.4); armL(o, -0.9, 0.2, 0.0, 0.4);
+  } },
+  { t: 0.5, ease: 'inout', pose: (o) => { // 猛ダッシュ
+    FSTANCE(o); bset(o, { hipsPitch: 0.5, waistPitch: 0.6, neckPitch: -0.45, hipsZ: 0.25, lHipSwing: -0.6, lKnee: 0.9, rHipSwing: 1.1, rKnee: 1.0, rFlat: 0.2, lFlat: 0.2 });
+    armR(o, -1.0, 0.2, 0.0, 0.5); armL(o, -1.0, 0.2, 0.0, 0.5);
+  } },
+  { t: 0.62, ease: 'in', pose: (o) => { // 飛び蹴り: 上体をのけぞらせ、右脚をまっすぐ前へ
+    FSTANCE(o); bset(o, { ground: 0, lift: 0.6, hipsPitch: -0.45, waistPitch: -0.25, neckPitch: 0.1, hipsZ: 0.3, rHipSwing: 1.5, rKnee: 0.1, rFlat: 0.0, rAnkle: -0.3, lHipSwing: 0.2, lKnee: 1.3, lFlat: 0.0 });
+    armR(o, 0.4, 1.3, 0.0, 0.3); armL(o, 0.6, 1.2, 0.0, 0.3);
+  } },
+  { t: 0.8, ease: 'out', pose: (o) => { // 蹴り抜けて、着地へ
+    FSTANCE(o); bset(o, { ground: 0, lift: 0.3, hipsPitch: -0.3, waistPitch: -0.1, hipsZ: 0.3, rHipSwing: 1.3, rKnee: 0.3, rFlat: 0.0, lHipSwing: 0.3, lKnee: 1.0, lFlat: 0.0 });
+    armR(o, 0.6, 1.0, 0.0, 0.5); armL(o, 0.7, 1.0, 0.0, 0.5);
+  } },
+  { t: 1, ease: 'out', pose: aGuard },
+];
+const attackA2 = (ctx, o) => keyed(ctx.attackT, ARW2, o);
+
+// ---- 通常3: 相手に下向き矢印をぺたりと貼って地面に押さえつけ、連続パンチ。0.3 で押さえつけ、0.4〜0.93 で6連打 ----
+const A3A = [
+  { t: 0, pose: aGuard },
+  { t: 0.15, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: -0.08, waistPitch: -0.05, lKnee: 0.9, rKnee: 0.8 }); armR(o, 2.6, 0.4, 0.0, 0.5); armL(o, 1.3, 0.3, 0.1, 1.6); } },
+  { t: 0.3, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: 0.22, hipsPitch: 0.25, waistPitch: 0.85, neckPitch: -0.3, lHipSwing: 0.85, lKnee: 0.6, rHipSwing: -0.4, rKnee: 0.6, rFlat: 0.3 }); armR(o, 1.3, 0.0, 0.0, 0.3); armL(o, 1.5, 0.3, 0.1, 1.2); } },
+];
+function attackA3(ctx, o) {
+  const t = ctx.attackT;
+  if (t < 0.3) { keyed(t, A3A, o); return; }
+  const rec = smooth((t - 0.93) / 0.07);
+  const f = clamp01((t - 0.3) / 0.63);
+  const s = sin(f * 6 * PI + PI * 0.5); // 右 → 左 → 右 ...（連打）
+  FSTANCE(o);
+  bset(o, { hipsZ: 0.22, hipsPitch: 0.25, waistPitch: 0.85 + 0.08 * abs(s), neckPitch: -0.3, lHipSwing: 0.85, lKnee: 0.6, rHipSwing: -0.4, rKnee: 0.6, rFlat: 0.3, waistYaw: 0.15 * s });
+  armR(o, 1.65 - 0.5 * s, 0.0, 0.0, 0.5 + 0.5 * (1 + s) / 2);
+  armL(o, 1.65 + 0.5 * s, 0.3, 0.1, 0.5 + 0.5 * (1 - s) / 2);
+  if (rec > 0) { const g = {}; aGuard(g); for (const k of Object.keys(g)) o[k] += (g[k] - o[k]) * rec; }
+}
+
+// ---- 大砲（スキル1）: 両手で砲弾の矢印を貼って構え、0.5 で撃ち出す ----
+const CANNON = [
+  { t: 0, pose: aGuard },
+  { t: 0.3, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { waistPitch: 0.3, hipsZ: -0.1, lKnee: 1.0, rKnee: 0.95, lHipSwing: 0.6 }); armR(o, 1.15, 0.15, 0.2, 1.1); armL(o, 1.15, 0.15, 0.2, 1.1); } },
+  { t: 0.5, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { waistPitch: 0.42, hipsZ: 0.22, hipsPitch: 0.15, lKnee: 0.55, rKnee: 0.7, lHipSwing: 0.9, rHipSwing: -0.5, rFlat: 0.3 }); armR(o, 1.55, 0.0, 0.1, 0.1); armL(o, 1.55, 0.0, 0.1, 0.1); } },
+  { t: 0.72, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { waistPitch: 0.45, hipsZ: 0.22, hipsPitch: 0.18, lKnee: 0.55, rKnee: 0.7, lHipSwing: 0.9, rHipSwing: -0.5, rFlat: 0.3 }); armR(o, 1.5, 0.0, 0.1, 0.15); armL(o, 1.5, 0.0, 0.1, 0.15); } },
+  { t: 1, ease: 'out', pose: aGuard },
+];
+const arrowCannon = (ctx, o) => keyed(ctx.attackT, CANNON, o);
+
+// ---- かがんで矢印をぺたり（足・床・地面に貼る）。0.45 で貼る ----
+const STICK = [
+  { t: 0, pose: aGuard },
+  { t: 0.45, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsPitch: 0.3, waistPitch: 1.0, neckPitch: -0.3, lKnee: 1.25, rKnee: 1.15, lHipSwing: 0.8, rHipSwing: 0.3 }); armR(o, 1.05, 0.15, 0.0, 0.2); armL(o, 1.0, 0.15, 0.0, 0.25); } },
+  { t: 0.7, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { hipsPitch: 0.3, waistPitch: 0.95, neckPitch: -0.3, lKnee: 1.25, rKnee: 1.15, lHipSwing: 0.8, rHipSwing: 0.3 }); armR(o, 1.05, 0.15, 0.0, 0.2); armL(o, 1.0, 0.15, 0.0, 0.25); } },
+  { t: 1, ease: 'out', pose: aGuard },
+];
+const arrowStick = (ctx, o) => keyed(ctx.attackT, STICK, o);
+
+// ---- 高く跳ぶ・叩きつけ（スキル2）----
+const arrowJump = (ctx, o) => {
+  bset(o, { ground: 0, hipsPitch: 0.05, waistPitch: -0.1, neckPitch: -0.2, lHipSwing: 0.7, lKnee: 1.2, lHipOut: 0.2, lAnkle: -0.3, rHipSwing: 0.4, rKnee: 1.3, rHipOut: 0.2, rAnkle: -0.3 });
+  armR(o, 2.5, 0.35, 0.0, 0.6); armL(o, 2.5, 0.35, 0.0, 0.6);
+};
+const arrowDive = (ctx, o) => {
+  bset(o, { ground: 0, hipsPitch: 0.1, waistPitch: 0.25, neckPitch: 0.2, lHipSwing: 0.15, lKnee: 0.15, lHipOut: 0.1, lAnkle: -0.5, rHipSwing: 0.05, rKnee: 0.1, rHipOut: 0.1, rAnkle: -0.5 });
+  armR(o, 0.6, 1.0, 0.0, 0.6); armL(o, 0.6, 1.0, 0.0, 0.6);
+};
+
+// ---- 相手へ矢印を飛ばす・貼る（スキル4・必殺技）。0.5 で右手を突き出す ----
+const SLAP = [
+  { t: 0, pose: aGuard },
+  { t: 0.3, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { hipsYaw: -0.4, waistYaw: -0.45, neckYaw: 0.6, lKnee: 0.9, rKnee: 0.8 }); armR(o, 0.6, 0.6, 0.2, 1.7); armL(o, 1.3, 0.1, 0.1, 1.0); } },
+  { t: 0.5, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { hipsYaw: 0.35, waistYaw: 0.4, neckYaw: -0.2, hipsZ: 0.2, waistPitch: 0.35, lHipSwing: 0.9, lKnee: 0.5, rHipSwing: -0.5, rFlat: 0.3 }); armR(o, 1.55, 0.0, 0.2, 0.1); armL(o, 0.9, 0.3, 0.1, 2.0); } },
+  { t: 0.75, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsYaw: 0.4, waistYaw: 0.45, hipsZ: 0.2, waistPitch: 0.4, lHipSwing: 0.9, lKnee: 0.5, rHipSwing: -0.5, rFlat: 0.3 }); armR(o, 1.5, 0.0, 0.2, 0.15); armL(o, 0.9, 0.3, 0.1, 2.0); } },
+  { t: 1, ease: 'out', pose: aGuard },
+];
+const arrowSlap = (ctx, o) => keyed(ctx.attackT, SLAP, o);
+
+// ---- 必殺技: 両手を頭の上に上げて、前向き矢印を貼る（attackT 0 → 1）----
+const arrowRaise = (ctx, o) => {
+  const u = smooth(ctx.attackT / 0.6);
+  FSTANCE(o);
+  bset(o, { waistPitch: 0.1 - 0.35 * u, neckPitch: -0.1 - 0.35 * u, lKnee: 0.65 + 0.2 * u, rKnee: 0.55 + 0.2 * u });
+  armR(o, 1.25 + 1.65 * u, 0.25 + 0.1 * u, 0.1, 1.9 - 1.6 * u); armL(o, 1.35 + 1.55 * u, 0.3 + 0.1 * u, 0.1, 1.9 - 1.6 * u);
+};
+// ---- 人間砲弾: 腕をそろえてまっすぐ前へ飛ぶ ----
+const arrowRush = (ctx, o) => {
+  const f = 0.05 * sin(ctx.time * 40);
+  bset(o, { ground: 0, lift: 2.4, hipsPitch: 0.6, waistPitch: 0.9, neckPitch: -0.9, lHipSwing: -0.5 + f, lKnee: 0.2, lAnkle: -0.6, rHipSwing: -0.6 - f, rKnee: 0.25, rAnkle: -0.6 });
+  armR(o, 2.9, 0.05, 0.0, 0.1); armL(o, 2.9, 0.05, 0.0, 0.1);
+};
+// ---- 押さえつけられている相手（下向き矢印）----
+const pressed = (ctx, o) => {
+  const j = ctx.jolt ?? 0;
+  bset(o, { hipsPitch: 0.3 + 0.1 * j, waistPitch: 0.7 + 0.15 * j, neckPitch: 0.4, lHipSwing: 0.5, lKnee: 1.0, lHipOut: 0.5, rHipSwing: 0.4, rKnee: 0.9, rHipOut: 0.5, hipsRoll: 0.08 * sin(ctx.time * 60) * j });
+  armR(o, 0.8, 0.9, 0.0, 0.8); armL(o, 0.8, 0.9, 0.0, 0.8);
+};
+
 export const POSES = {
+  attackA1, attackA2, attackA3, arrowCannon, arrowStick, arrowJump, arrowDive, arrowSlap, arrowRaise, arrowRush, pressed,
   attackF1, attackF2, attackF3, attackFAir, attackFStrike, fangRaise, fangSweep1, fangSweep2, fangSweep3, fangMorph, fangSpin, fangLand, fangBerserk, lookAround,
   attackB1, attackB2, attackB3, attackBP, attackBQ, batCall, batPitch, batPitchL, batBallDraw, batHaymaker, batCatch, batToss, batLeap, batSmash,
   ultDraw, ultThrow, ultSummon, ultWindup, ultDash, ultFinish, ultLeap, ultLand,

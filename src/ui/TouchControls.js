@@ -239,6 +239,23 @@ const FANG_ICONS = {
   ult: svgWrap('', `<polygon points="32,4 50,24 32,60 14,24" fill="#d1062a" stroke="#4a0010" stroke-width="3"/><polygon points="32,4 50,24 14,24" fill="#ff5a70" stroke="#4a0010" stroke-width="2.4"/><polygon points="32,24 50,24 32,60" fill="#9a0420"/><polygon points="22,18 28,12 30,20" fill="#fff" opacity="0.8"/>`),
 };
 
+// ---- 矢印用のアイコン ----
+const ARW = (fill, rot = 0, cx = 32, cy = 32, k = 1, edge = '#ffffff') => `<g transform="translate(${cx} ${cy}) rotate(${rot}) scale(${k})"><path d="M-6 22 L6 22 L6 -2 L16 -2 L0 -22 L-16 -2 L-6 -2 Z" fill="${fill}" stroke="${edge}" stroke-width="2.6"/></g>`;
+const ARROW_ICONS = {
+  // 通常攻撃: 拳と、加速の矢印
+  attack: svgWrap('', `<rect x="8" y="26" width="26" height="22" rx="6" fill="#fff" stroke="#5a3a10" stroke-width="2.6"/>${ARW('#ffc21a', 90, 46, 28, 0.62, '#5a3a10')}${ARW('#ffc21a', 90, 56, 28, 0.5, '#5a3a10')}`),
+  // スキル1: 砲弾の矢印
+  skill1: svgWrap('icon-main', `<circle cx="46" cy="18" r="12" fill="#ff5a1f" stroke="#fff" stroke-width="2.6"/>${ARW('#ff5a1f', 35, 26, 40, 1.1, '#fff')}`),
+  // スキル3: 床に並んだ加速の矢印
+  skill3: svgWrap('icon-alt', `${ARW('#ffc21a', 90, 12, 34, 0.6)}${ARW('#ffc21a', 90, 32, 34, 0.7)}${ARW('#ffc21a', 90, 52, 34, 0.85)}`),
+  // スキル2: 上向き矢印と、足
+  skill2: svgWrap('icon-main', `${ARW('#3dff7a', 0, 32, 28, 1.0)}<rect x="22" y="48" width="20" height="9" rx="3" fill="#333" stroke="#fff" stroke-width="2"/>`),
+  // スキル4: 鈍足の矢印（青）
+  skill4: svgWrap('icon-alt', `${ARW('#4ca8ff', 180, 32, 28, 1.0)}<path d="M14 54 H50" stroke="#fff" stroke-width="4"/><path d="M20 58 H44" stroke="#fff" stroke-width="3"/>`),
+  // 必殺技: 前向きの矢印（水色）と、人
+  ult: svgWrap('', `<circle cx="18" cy="40" r="7" fill="#fff" stroke="#124a55" stroke-width="2.4"/><rect x="12" y="46" width="12" height="12" rx="3" fill="#fff" stroke="#124a55" stroke-width="2.4"/>${ARW('#3ff0ff', 90, 42, 20, 0.95, '#124a55')}`),
+};
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -391,7 +408,7 @@ export class TouchControls {
 
   // 武器に合わせて、ボタンのアイコンを入れ替える（'sword' は最初のまま。'bat' はバット用）
   setWeapon(id) {
-    const ICONS = id === 'bat' ? BAT_ICONS : id === 'fang' ? FANG_ICONS : null;
+    const ICONS = id === 'bat' ? BAT_ICONS : id === 'fang' ? FANG_ICONS : id === 'arrow' ? ARROW_ICONS : null;
     if (!ICONS) return;
     const swap = (sel, icon, svgSel = 'svg') => {
       const el = this.root.querySelector(sel);

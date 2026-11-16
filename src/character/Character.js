@@ -5,6 +5,7 @@ import { RIG } from './rig.js';
 import { createSword } from './Sword.js';
 import { createBat } from './Bat.js';
 import { createClaws, createFangs } from './Fang.js';
+import { createFist, createArrowSticker, ARROW_COLORS } from './Arrow.js';
 import { StatusEffects } from './StatusEffects.js';
 import { SwordTrail } from '../effects/SwordTrail.js';
 
@@ -248,6 +249,31 @@ export function createCharacter(options = {}) {
     fangs = createFangs(R.head);
     neck.add(fangs);
   }
+  // ---- 矢印（素手。右の前腕に加速の矢印、すねに上向きの矢印を貼る。武器選択で選んだときだけ使う）----
+  let fist = null;
+  let armSticker = null;
+  const shinStickers = [];
+  if (o.sword) {
+    fist = createFist();
+    joints.rWrist.add(fist);
+    // 右の前腕の外側に、手の方向を向いた加速の矢印
+    const outer = new THREE.Group();
+    outer.position.set(-(R.armW * 0.95) / 2 - 0.04, -R.forearm / 2, 0);
+    outer.rotation.y = -Math.PI / 2;
+    armSticker = createArrowSticker(ARROW_COLORS.accel, { variant: 'double', scale: 0.52 });
+    armSticker.rotation.z = Math.PI;
+    armSticker.visible = false;
+    outer.add(armSticker);
+    joints.rElbow.add(outer);
+    // すねの前に、上向きの矢印（左右）
+    for (const kn of [joints.lKnee, joints.rKnee]) {
+      const st = createArrowSticker(ARROW_COLORS.up, { scale: 0.34 });
+      st.position.set(0, -R.shin / 2, R.legD * 0.96 / 2 + 0.04);
+      st.visible = false;
+      kn.add(st);
+      shinStickers.push(st);
+    }
+  }
   // 今握っている武器（軌跡・オーラはこちらに付ける）
   let held = sword;
   let heldTrail = trail;
@@ -268,9 +294,9 @@ export function createCharacter(options = {}) {
     bat.visible = id === 'bat';
     claws.visible = clawsL.visible = fangs.visible = id === 'fang';
     great.visible = false;
-    held = id === 'bat' ? bat : id === 'fang' ? claws : sword;
-    heldTrail = id === 'bat' ? trailBat : id === 'fang' ? trailFang : trail;
-    animator.armed = id === 'bat' ? 'bat' : id === 'fang' ? 'fang' : 'sword';
+    held = id === 'bat' ? bat : id === 'fang' ? claws : id === 'arrow' ? fist : sword;
+    heldTrail = id === 'bat' ? trailBat : id === 'fang' ? trailFang : id === 'arrow' ? null : trail;
+    animator.armed = id === 'bat' ? 'bat' : id === 'fang' ? 'fang' : id === 'arrow' ? 'arrow' : 'sword';
   };
 
   const animator = new Animator({ group, joints, soles, scale: o.scale, armed: sword ? 'sword' : false });
@@ -366,6 +392,9 @@ export function createCharacter(options = {}) {
     get weapon() { return weaponId; },
     swordModel: sword,
     bat,
+    fist,
+    armSticker,
+    shinStickers,
     claws,
     clawsL,
     fangs,

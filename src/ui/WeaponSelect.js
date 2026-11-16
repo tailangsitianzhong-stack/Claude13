@@ -12,7 +12,7 @@ const CSS = `
 #weapon-select h1 { margin: 0; font: 900 min(7vw, 36px)/1 system-ui, sans-serif; letter-spacing: 0.3em; text-shadow: 0 0 18px #4fd8ff, 0 3px 0 #04203d; }
 #weapon-select .sub { margin-top: -6px; font-size: 12px; letter-spacing: 0.3em; color: #9fd4ff; }
 #weapon-select .cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
-#weapon-select .card { box-sizing: border-box; width: min(30vw, 210px); padding: 12px 12px 14px; border-radius: 14px; text-align: center; cursor: pointer; position: relative;
+#weapon-select .card { box-sizing: border-box; width: min(calc((100vw - 110px) / 4), 210px); padding: 12px 12px 14px; border-radius: 14px; text-align: center; cursor: pointer; position: relative;
   background: linear-gradient(#1b3366, #0f1c40); border: 3px solid rgba(255,255,255,0.35); box-shadow: 0 6px 0 #040a1c, 0 8px 18px rgba(0,0,0,0.45);
   transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s; }
 #weapon-select .card.sel { border-color: #ffd54a; transform: translateY(-3px) scale(1.03); box-shadow: 0 6px 0 #040a1c, 0 0 0 4px rgba(255,213,74,0.35), 0 0 26px 6px rgba(255,200,60,0.55); }
@@ -59,7 +59,14 @@ const FANG_ICON = `
   <path d="M10 66 Q14 88 22 104 M26 64 Q30 88 36 106 M42 66 Q46 88 52 104" fill="none" stroke="#e8e0d0" stroke-width="5"/>
   <path d="M10 66 Q14 88 22 104 M26 64 Q30 88 36 106 M42 66 Q46 88 52 104" fill="none" stroke="#c0172c" stroke-width="1.6"/>
 </svg>`;
-const ICONS = { sword: SWORD_ICON, bat: BAT_ICON, fang: FANG_ICON };
+// 矢印のアイコン（上向き・右向きの矢印と、拳）
+const ARROW_ICON = `
+<svg viewBox="0 0 64 110" aria-hidden="true" stroke-linejoin="round" stroke-linecap="round">
+  <path d="M26 66 L38 66 L38 30 L52 30 L32 4 L12 30 L26 30 Z" fill="#3dff7a" stroke="#0b4a22" stroke-width="2.6"/>
+  <rect x="6" y="74" width="30" height="26" rx="7" fill="#fff" stroke="#3a4560" stroke-width="2.4"/>
+  <path d="M40 80 L58 80 L58 74 L70 87 L58 100 L58 94 L40 94 Z" fill="#ffc21a" stroke="#5a3a10" stroke-width="2.2" transform="translate(-8 0) scale(0.9)"/>
+</svg>`;
+const ICONS = { sword: SWORD_ICON, bat: BAT_ICON, fang: FANG_ICON, arrow: ARROW_ICON };
 const STAT_LABELS = { power: '攻撃力', speed: '速さ', reach: 'リーチ' };
 
 export class WeaponSelect {

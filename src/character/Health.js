@@ -36,6 +36,14 @@ export const DAMAGE = {
   fangS3: 26, fangS3Final: 60,    // スキル3: 分身の爪1回・最後の1回
   fangS4: 34, fangS4Final: 70,    // スキル4: 回転薙ぎ払い1回・最後の1回
   fangUltGem: 40, fangUltBite: 180, fangUltHeal: 0.3, // 必殺技: 宝石・重い牙の一撃・最大HPに対する回復の割合
+  // 矢印
+  arrow: [38, 42, 20],            // 通常攻撃（加速パンチ・ダッシュ蹴り・押さえつけ）
+  arrowPunch: 11,                 // 通常3段目: 押さえつけての連打1発
+  arrowErupt: 100,                // コンボ: 上向き矢印の隆起
+  arrowCannon: 95,                // スキル1: 砲弾の矢印
+  arrowSlam: 105,                 // スキル2: 高く飛んでの叩きつけ
+  arrowRushBase: 40, arrowRushPerDist: 2.4, arrowRushMax: 230, // スキル3: 加速ダッシュ（距離が遠いほど高い。リグ単位の距離あたり）
+  arrowUltRush: 60, arrowUltJunk: 12, arrowUltBig: 45, arrowUltCrush: 150, // 必殺技: 突撃・ゴミ1つ・大きなゴミ・押しつぶし
   ultDagger: 40,                  // 必殺技: 小剣が刺さる
   ultSlash: 28,                   // 必殺技: 斬撃1回ぶん
   ultFinal: 160,                  // 必殺技: 最後の一撃

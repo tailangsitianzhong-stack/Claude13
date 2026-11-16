@@ -8,6 +8,9 @@ import { FangController, FSKILL1 as FSK1, FSKILL2 as FSK2, FANG_ATTACKS } from '
 import { FangDirector } from './game/FangDirector.js';
 import { FangUltimateDirector } from './cinematic/FangUltimate.js';
 import { BatSwarm } from './character/FangBats.js';
+import { ArrowController, ASKILL1 as ASK1, ASKILL2 as ASK2 } from './character/ArrowController.js';
+import { ArrowDirector } from './game/ArrowDirector.js';
+import { ArrowUltimateDirector } from './cinematic/ArrowUltimate.js';
 import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4, ultPath } from './character/Controller.js';
 import { FIGHT, DAMAGE } from './character/Health.js';
 import { FightHud } from './ui/FightHud.js';
@@ -71,7 +74,8 @@ const swordPlayer = player;
 const batPlayer = new BatController(p1, { bounds: stage.bounds }); // バットを選んだときに使う
 const dummy = new CharacterController(p2, { bounds: stage.bounds });
 const fangPlayer = new FangController(p1, { bounds: stage.bounds }); // 吸血牙を選んだときに使う
-for (const pl of [swordPlayer, batPlayer, fangPlayer]) { pl.target = p2; pl.victim = dummy; } // 狙う相手・コンボ技で掴む相手
+const arrowPlayer = new ArrowController(p1, { bounds: stage.bounds }); // 矢印を選んだときに使う
+for (const pl of [swordPlayer, batPlayer, fangPlayer, arrowPlayer]) { pl.target = p2; pl.victim = dummy; } // 狙う相手・コンボ技で掴む相手
 dummy.idle = 'fight';
 const statusHud = new StatusHud('P2'); // 相手の状態異常の表示枠
 const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleStance: false };
@@ -158,7 +162,7 @@ function dealDamage(amount, at, kind) {
 }
 
 // スキルを使うたびに、ゲージが少し溜まる
-const GAUGE_ON_USE = new Set(['fangSkill1Start', 'fangSkill2Start', 'fangSkill3Start', 'fangSkill4Start', 'batSkill1Start', 'batSkill2Start', 'batSkill3Start', 'batSkill4Start', 'skillStart', 'skill2Start', 'skill3Start', 'skill4Start', 'finisherGrab', 'airSlamStart']);
+const GAUGE_ON_USE = new Set(['arrowSkill1Start', 'arrowSkill2Start', 'arrowSkill3Start', 'arrowSkill4Start', 'arrowFinStart', 'fangSkill1Start', 'fangSkill2Start', 'fangSkill3Start', 'fangSkill4Start', 'batSkill1Start', 'batSkill2Start', 'batSkill3Start', 'batSkill4Start', 'skillStart', 'skill2Start', 'skill3Start', 'skill4Start', 'finisherGrab', 'airSlamStart']);
 // 当たった瞬間のダメージ（イベントで知らせてくる技）
 const EVENT_DAMAGE = {
   skillStick: DAMAGE.skill1Stick, skillPunch: DAMAGE.skill1Punch, skillPullOut: DAMAGE.skill1PullOut, skillKick: DAMAGE.skill1Kick,
@@ -190,7 +194,9 @@ function onAttackEvent(e) {
   if (player.state !== 'ult' && GAUGE_ON_USE.has(e.type)) player.gauge.add(FIGHT.gaugePerSkill);
   if (EVENT_DAMAGE[e.type]) dealDamage(EVENT_DAMAGE[e.type]);
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type.startsWith('fang')) {
+  if (e.type.startsWith('arrow')) {
+    arrowDirector.onEvent(e);
+  } else if (e.type.startsWith('fang')) {
     fangDirector.onEvent(e);
   } else if (e.type.startsWith('bat')) {
     batDirector.onEvent(e);
@@ -259,9 +265,10 @@ function onAttackEvent(e) {
     // 斬撃波: 振った向きの三日月が前へ飛ぶ（見た目だけ。当たり判定は剣とオーラ）
     const h = p1.group.rotation.y;
     v1.set(p1.group.position.x + Math.sin(h) * 0.25, p1.height * (strong ? 0.75 : 0.62), p1.group.position.z + Math.cos(h) * 0.25);
-    if (player.weaponId === 'fang') fangDirector.onSwing(e);
+    if (player.weaponId === 'arrow') arrowDirector.onSwing(e);
+    else if (player.weaponId === 'fang') fangDirector.onSwing(e);
     else if (player.weaponId !== 'bat') impact.wave(v1, h, WAVE_TILT[e.index], p1.height * (strong ? 1.15 : 0.95), p1.height * (strong ? 6 : 7.5)); // バットには斬撃波はない
-  } else if (e.type === 'slam' && player.weaponId !== 'fang') {
+  } else if (e.type === 'slam' && player.weaponId !== 'fang' && player.weaponId !== 'arrow') {
     fx.shake(0.32);                       // 着地の衝撃
     fx.kick(0, -0.7, 0);
     // 叩きつけた地点に衝撃波の輪と土煙
@@ -686,6 +693,7 @@ function checkHit() {
   bladeTip.copy(p1.sword.userData.tip).applyMatrix4(p1.sword.matrixWorld);
   const bat = player.weaponId === 'bat';
   const fang = player.weaponId === 'fang';
+  const arrow = player.weaponId === 'arrow';
   const atk = player.attacks[player.attackIndex];
   if (bat) {
     if (hadPrevTip) {
@@ -717,8 +725,8 @@ function checkHit() {
   const low = Math.min(bladeBase.y, bladeTip.y) < p2.group.position.y + p2.height * 1.05;
   let touching = low && (distToSegmentXZ(tx, tz, bladeBase, bladeTip) < r
     || (hadPrevTip && distToSegmentXZ(tx, tz, prevTip, bladeTip) < r));
-  if (fang && atk.bite) {
-    // 噛みつき: 爪ではなく、正面の近くにいる相手に当たる
+  if ((fang || arrow) && atk.bite) {
+    // 噛みつき・素手の打撃: 爪や拳ではなく、正面の近くにいる相手に当たる
     const ddx = tx - p1.group.position.x;
     const ddz = tz - p1.group.position.z;
     const dd = Math.hypot(ddx, ddz) || 1;
@@ -735,12 +743,14 @@ function checkHit() {
 
   player.hitDone = true;
   // 3段目を当てたら、少しの間だけコンボ技（掴み上げ）を出せる
-  if (player.attackIndex === 2 && !fang) player.finisherWindow = FINISHER.window;
+  if (player.attackIndex === 2 && !fang && !arrow) player.finisherWindow = FINISHER.window; // 矢印は、押さえつけが終わったときに出る
   const power = player.attacks[player.attackIndex].power;
   const strong = power > 1;
   if (fang && atk.grab) player.startNeckBite(); // 首に噛みつく: つかんで離さない
+  else if (arrow && atk.grab) player.startPress(); // 下向き矢印で、地面に押さえつける
+  else if (arrow && atk.launch) dummy.launch(dx, dz, 62, 13); // 加速パンチ: 遠くへ吹っ飛ばす
   else dummy.hit(dx, dz, power);
-  dealDamage((bat ? DAMAGE.bat : fang ? DAMAGE.fang : DAMAGE.attack)[player.attackIndex]);
+  dealDamage((bat ? DAMAGE.bat : fang ? DAMAGE.fang : arrow ? DAMAGE.arrow : DAMAGE.attack)[player.attackIndex]);
 
   // 手応え: 時間を一瞬止め、画面を揺らし、ぐっと寄る
   hitStop = strong ? 0.13 : 0.07;
@@ -761,6 +771,7 @@ function checkHit() {
   impact.streak(v1, slashWorld, camera, p2.height * (strong ? 2.2 : 1.6));
   if (strong) impact.ring(p2.group.position, p2.height * 1.3, 0.35);
   if (fang) fangDirector.onBiteHit(player.attackIndex);
+  if (arrow) arrowDirector.onHit(player.attackIndex);
   if (bat) { // 風圧: 足もとに広がる輪と、土ぼこり。振りが強いほど大きい
     impact.ring(p2.group.position, p2.height * (1.2 + 1.8 * windStrength), 0.4);
     sparks.burst(v1.setY(p2.height * 0.15), forward, Math.round(8 + 14 * windStrength), p2.height * 0.06, p2.height * (2 + 3 * windStrength), 0.12, 0.2);
@@ -826,6 +837,16 @@ const fangUlt = new FangUltimateDirector({
   hooks: swordUlt.ctx.hooks, swarm: batSwarm, fang: fangDirector,
 });
 
+// 矢印: ステッカー・砲弾・隆起の演出と、必殺技（ゴミ処理場のムービー）
+const arrowHooks = { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) };
+const arrowDirector = new ArrowDirector({
+  scene, camera, impact, sparks, fx, p1, p2, stage, dummy, getPlayer: () => player, hooks: arrowHooks,
+});
+const arrowUlt = new ArrowUltimateDirector({
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, p2, getPlayer: () => player,
+  hooks: swordUlt.ctx.hooks, arrow: arrowDirector,
+});
+
 // ---- 試合前の武器選択 ----
 // 選んだ武器は game.weapon に入る。今は「剣」だけ（ほかの武器はあとから追加する）
 let started = false;
@@ -834,12 +855,13 @@ const weaponSelect = new WeaponSelect((id) => {
   weapon = getWeapon(id);
   // 選んだ武器に切り替える: キャラの持ち物と、操作するコントローラ
   p1.setWeapon(id);
-  player = id === 'bat' ? batPlayer : id === 'fang' ? fangPlayer : swordPlayer;
-  ultDirector = id === 'bat' ? batUlt : id === 'fang' ? fangUlt : swordUlt;
+  player = id === 'bat' ? batPlayer : id === 'fang' ? fangPlayer : id === 'arrow' ? arrowPlayer : swordPlayer;
+  ultDirector = id === 'bat' ? batUlt : id === 'fang' ? fangUlt : id === 'arrow' ? arrowUlt : swordUlt;
   window.game.player = player;
   window.game.ult = ultDirector;
   touch.setWeapon(id); // ボタンのアイコンを、武器に合わせる
   if (id === 'bat') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（横殴り→一回転→ボール）　T / G: 必殺技　K / E: スキル1（金属バット弾）→ 使用後はスキル3（ボール連打）　L / Q: スキル2（バット投げ）→ 使用後はスキル4（空中バット）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  if (id === 'arrow') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（加速パンチ→ダッシュ蹴り→押さえつけ連打）　3段目を当てたあとの Space: コンボ（地面を隆起）　T / G: 必殺技（前向き矢印）　K / E: スキル1（砲弾）→ 使用後はスキル3（加速ダッシュ）　L / Q: スキル2（高く飛んで叩きつけ）→ 使用後はスキル4（鈍足矢印）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   if (id === 'fang') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ　左クリック / J: 攻撃（噛みつき→爪の薙ぎ払い→首に噛みつく）　ジャンプ中に攻撃: かぎ爪×3　T / G: 必殺技（赤い宝石）　K / E: スキル1（赤い斬撃・吸血）→ 使用後はスキル3（分身）　L / Q: スキル2（巨大蝙蝠の突進）→ 使用後はスキル4（足を蝙蝠にして回転）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   started = true;
   document.body.classList.remove('pre-match');
@@ -887,8 +909,8 @@ function step(realDt) {
   // 剣以外の武器（バット・吸血牙）は、player.bs が今のスキルの進行状況。スキルの待ち時間は武器ごとに違う
   const own = player.weaponId !== 'sword';
   const bs = own ? player.bs?.n : 0;
-  const cd1 = player.weaponId === 'fang' ? FSK1.cooldown : player.weaponId === 'bat' ? BSKILL1.cooldown : SKILL1.cooldown;
-  const cd2 = player.weaponId === 'fang' ? FSK2.cooldown : player.weaponId === 'bat' ? BSKILL2.cooldown : SKILL2.cooldown;
+  const cd1 = player.weaponId === 'arrow' ? ASK1.cooldown : player.weaponId === 'fang' ? FSK1.cooldown : player.weaponId === 'bat' ? BSKILL1.cooldown : SKILL1.cooldown;
+  const cd2 = player.weaponId === 'arrow' ? ASK2.cooldown : player.weaponId === 'fang' ? FSK2.cooldown : player.weaponId === 'bat' ? BSKILL2.cooldown : SKILL2.cooldown;
   const alt1 = own ? player.skill3Ready || bs === 3 : player.skill3Ready || player.state === 'skill3';
   const alt2 = own ? player.skill4Ready || bs === 4 : player.skill4Ready || player.state === 'skill4';
   touch.setSkillAlt(0, alt1);
@@ -934,7 +956,7 @@ function step(realDt) {
   const sx = p1.group.position.x - p2.group.position.x;
   const sz = p1.group.position.z - p2.group.position.z;
   const sep = Math.hypot(sx, sz);
-  const grappling = (player.weaponId === 'fang' && player.state.startsWith('bskill')) || player.state === 'finisher' || player.state === 'ult' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
+  const grappling = ((player.weaponId === 'fang' || player.weaponId === 'arrow') && player.state.startsWith('bskill')) || player.state === 'finisher' || player.state === 'ult' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
   if (!grappling && sep < minDist && sep > 1e-6 && p1.group.position.y < p2.height) {
     p1.group.position.x = p2.group.position.x + (sx / sep) * minDist;
     p1.group.position.z = p2.group.position.z + (sz / sep) * minDist;
@@ -960,6 +982,7 @@ function step(realDt) {
   sparks.update(dt, camera, p1.height * 1.1);
   batDirector.update(dt);
   fangDirector.update(dt);
+  arrowDirector.update(dt);
   batSwarm.update(dt, clock.elapsedTime);
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
   ultDirector.update(realDt);
@@ -1003,7 +1026,7 @@ function step(realDt) {
   if (!window.game.skipRender) renderer.render(scene, camera); // skipRender: 確認用の早送り
   fx.restore();
 }
-window.game.fang = fangDirector; window.game.swarm = batSwarm;
+window.game.arrow = arrowDirector; window.game.fang = fangDirector; window.game.swarm = batSwarm;
 window.game.step = step; // manual=true のとき、外からコマ送りできる（動作確認用）
 
 const clock = new THREE.Clock();

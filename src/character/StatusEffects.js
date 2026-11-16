@@ -3,6 +3,7 @@
 
 export const STATUS_DEFS = {
   stun: { label: '気絶', icon: '★', color: '#ffd54a' }, // 動けず、攻撃もできない。頭上に星が回る
+  slow: { label: '鈍足', icon: '▼', color: '#4ca8ff' }, // 移動速度が50%になる（矢印のスキル4）。胸に青い矢印が貼られる
 };
 
 export class StatusEffects {
