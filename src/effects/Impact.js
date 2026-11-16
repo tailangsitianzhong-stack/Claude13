@@ -34,7 +34,7 @@ function starTexture() {
 }
 
 // 三日月（弧の帯）。中心角 arc、内側ほど細い
-function crescentGeometry(arc, rOuter, thickness) {
+export function crescentGeometry(arc, rOuter, thickness) {
   const N = 20;
   const pos = [];
   const idx = [];
@@ -51,7 +51,7 @@ function crescentGeometry(arc, rOuter, thickness) {
   return g;
 }
 
-const glow = (color, map) => new THREE.MeshBasicMaterial({
+export const glow = (color, map) => new THREE.MeshBasicMaterial({
   color, map, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
   depthWrite: false, side: THREE.DoubleSide, fog: false,
 });
@@ -77,6 +77,11 @@ export class Impact {
     make('streak', 4, () => new THREE.Mesh(new THREE.PlaneGeometry(1, 1), glow(0xcff4ff)));
     make('ring', 3, () => new THREE.Mesh(new THREE.RingGeometry(0.78, 1, 40).rotateX(-Math.PI / 2), glow(0x9fe6ff)));
     make('wave', 12, () => new THREE.Mesh(crescentGeometry(2.3, 1, 0.34), glow(0x6fdcff)));
+    make('blood', 14, () => { // 吸血牙の赤い斬撃（緑の草の上でも赤く見えるよう、加算ではなく通常の合成）
+      const m = glow(0xe0102c);
+      m.blending = THREE.NormalBlending;
+      return new THREE.Mesh(crescentGeometry(2.3, 1, 0.3), m);
+    });
     make('wind', 14, () => new THREE.Mesh(crescentGeometry(2.3, 1, 0.3), glow(0xf2fbff))); // バットの風（白）
   }
 
@@ -147,7 +152,7 @@ export class Impact {
       } else if (it.kind === 'ring') {
         o.scale.setScalar(it.size * (0.15 + 0.85 * easeOut(t)));
         o.material.opacity = 0.9 * (1 - t);
-      } else if (it.kind === 'wind') {
+      } else if (it.kind === 'wind' || it.kind === 'blood') {
         o.position.addScaledVector(it.vel, dt);
         o.scale.set(it.size * (0.6 + 0.9 * easeOut(t)), it.size * (0.6 + 0.5 * easeOut(t)), it.size * (0.6 + 0.9 * easeOut(t)));
         o.material.opacity = 0.7 * (1 - t * t);

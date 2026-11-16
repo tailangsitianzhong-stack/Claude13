@@ -4,6 +4,7 @@ import { Animator } from './Animator.js';
 import { RIG } from './rig.js';
 import { createSword } from './Sword.js';
 import { createBat } from './Bat.js';
+import { createClaws, createFangs } from './Fang.js';
 import { StatusEffects } from './StatusEffects.js';
 import { SwordTrail } from '../effects/SwordTrail.js';
 
@@ -229,6 +230,24 @@ export function createCharacter(options = {}) {
     joints.rWrist.add(bat);
     trailBat = new SwordTrail(bat);
   }
+  // ---- 吸血牙（両手の爪と、口の牙。武器選択で選んだときだけ表示する）----
+  let claws = null;
+  let clawsL = null;
+  let fangs = null;
+  let trailFang = null;
+  if (o.sword) {
+    claws = createClaws();
+    claws.position.set(0, -R.hand / 2, 0);
+    claws.visible = false;
+    joints.rWrist.add(claws);
+    trailFang = new SwordTrail(claws, [1, 0.12, 0.2]);
+    clawsL = createClaws();
+    clawsL.position.set(0, -R.hand / 2, 0);
+    clawsL.visible = false;
+    joints.lWrist.add(clawsL);
+    fangs = createFangs(R.head);
+    neck.add(fangs);
+  }
   // 今握っている武器（軌跡・オーラはこちらに付ける）
   let held = sword;
   let heldTrail = trail;
@@ -247,10 +266,11 @@ export function createCharacter(options = {}) {
     weaponId = id;
     sword.visible = id === 'sword';
     bat.visible = id === 'bat';
+    claws.visible = clawsL.visible = fangs.visible = id === 'fang';
     great.visible = false;
-    held = id === 'bat' ? bat : sword;
-    heldTrail = id === 'bat' ? trailBat : trail;
-    animator.armed = id === 'bat' ? 'bat' : 'sword';
+    held = id === 'bat' ? bat : id === 'fang' ? claws : sword;
+    heldTrail = id === 'bat' ? trailBat : id === 'fang' ? trailFang : trail;
+    animator.armed = id === 'bat' ? 'bat' : id === 'fang' ? 'fang' : 'sword';
   };
 
   const animator = new Animator({ group, joints, soles, scale: o.scale, armed: sword ? 'sword' : false });
@@ -270,6 +290,16 @@ export function createCharacter(options = {}) {
     }
   });
   const WHITE = new THREE.Color(0xffffff);
+  // 全身に色をまとわせる（吸血牙の凶暴化: 赤く光る）。k = 0 で元に戻る
+  const tintColor = new THREE.Color();
+  const setTint = (color, k) => {
+    tintColor.set(color);
+    for (const m of materials) {
+      if (k <= 0) { m.emissive.copy(m.userData.baseEmissive); m.emissiveIntensity = m.userData.baseIntensity; continue; }
+      m.emissive.copy(m.userData.baseEmissive).lerp(tintColor, k);
+      m.emissiveIntensity = Math.max(m.userData.baseIntensity, 0.1 + 0.28 * k);
+    }
+  };
   const setFlash = (k) => {
     for (const m of materials) {
       m.emissive.copy(m.userData.baseEmissive).lerp(WHITE, k);
@@ -303,6 +333,7 @@ export function createCharacter(options = {}) {
     if (trail) trail.update(dt);
     if (trailGreat) trailGreat.update(dt);
     if (trailBat) trailBat.update(dt);
+    if (trailFang) trailFang.update(dt);
     if (stars.visible) {
       starTime += dt;
       starMeshes.forEach((m, i) => {
@@ -315,7 +346,7 @@ export function createCharacter(options = {}) {
     }
     if (held) {
       // 斬撃のオーラ: 振りかぶりで灯り、斬っている間は全開、終わるとすっと消える
-      const want = animator.trailOn ? 1 : animator.name === 'batCall' ? 0.9 : animator.name === 'chargeStance' ? 0.2 + 0.4 * animator.attackT : animator.name === 'stabCharge' ? 0.55 + 0.45 * animator.attackT : animator.name === 'ultDash' || animator.name === 'ultWindup' || animator.name === 'ultLeap' ? 1 : animator.name === 'ultSummon' ? 0.3 + 0.7 * animator.attackT : animator.name === 'airSlam' || animator.name === 'throw' || animator.name === 'groundStab' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
+      const want = animator.trailOn ? 1 : animator.name === 'batCall' ? 0.9 : animator.name === 'fangRaise' ? 0.9 : animator.name === 'chargeStance' ? 0.2 + 0.4 * animator.attackT : animator.name === 'stabCharge' ? 0.55 + 0.45 * animator.attackT : animator.name === 'ultDash' || animator.name === 'ultWindup' || animator.name === 'ultLeap' ? 1 : animator.name === 'ultSummon' ? 0.3 + 0.7 * animator.attackT : animator.name === 'airSlam' || animator.name === 'throw' || animator.name === 'groundStab' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
       auraLevel += (want - auraLevel) * (1 - Math.exp(-(want > auraLevel ? 30 : 9) * dt));
       auraTime += dt;
       held.userData.setAura(animator.debug ? (animator.debug.aura ?? 0) : auraLevel, auraTime);
@@ -335,6 +366,11 @@ export function createCharacter(options = {}) {
     get weapon() { return weaponId; },
     swordModel: sword,
     bat,
+    claws,
+    clawsL,
+    fangs,
+    trailFang,
+    setTint,
     trail,
     trailBat,
     setWeapon,

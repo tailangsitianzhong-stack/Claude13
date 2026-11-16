@@ -14,6 +14,9 @@ const CSS = `
 #cine-overlay .title { position: absolute; left: 0; right: 0; top: 38%; text-align: center; opacity: 0; color: #fff;
   font: 900 min(14vw, 96px)/1 system-ui, sans-serif; letter-spacing: 0.12em; -webkit-text-stroke: 5px #0a3a6b; paint-order: stroke fill;
   text-shadow: 0 0 24px #4fd8ff, 0 6px 0 #04203d; }
+#cine-overlay.blood .title { -webkit-text-stroke: 5px #4a0612; text-shadow: 0 0 24px #ff2a44, 0 6px 0 #1c0206; }
+#cine-overlay.blood .title small { color: #ffb3bd; text-shadow: 0 0 10px #ff2a44; }
+#cine-overlay.blood .vig { background: radial-gradient(ellipse at center, transparent 45%, rgba(40,0,6,0.78) 100%); }
 #cine-overlay .title small { display: block; margin-top: 12px; font-size: min(3.6vw, 24px); letter-spacing: 0.5em; -webkit-text-stroke: 0; color: #bfeaff; text-shadow: 0 0 10px #4fd8ff; }
 `;
 
@@ -38,6 +41,8 @@ export class CineOverlay {
     this.render();
   }
 
+  // テーマ: 'blood'（吸血牙のムービー）なら、タイトルと周辺が赤くなる
+  setTheme(name) { this.root.classList.toggle('blood', name === 'blood'); }
   setOn(on) { this.barsTarget = on ? 1 : 0; if (!on) this.linesTarget = 0; }
   setLines(on) { this.linesTarget = on ? 1 : 0; }
   // 全画面を白く光らせる（level 1 で真っ白）。そこから消えていく

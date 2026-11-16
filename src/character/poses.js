@@ -1602,7 +1602,226 @@ const SMASH = [
 ];
 const batSmash = (ctx, o) => keyed(ctx.attackT, SMASH, o);
 
+// ============================================================
+// 吸血牙（両手の爪）用のポーズ
+// 爪の向き pitch: 0 = 水平に前、π/2 = 真上、負 = 下向き（swordTilt = 肩の振り + 肘 − pitch）。左手は daggerTilt。
+// ============================================================
+const clawR = (o, swing, out, twist, elbow, pitch) => {
+  o.rShoulderSwing = swing; o.rShoulderOut = out; o.rShoulderTwist = twist; o.rElbow = elbow; o.swordTilt = swing + elbow - pitch;
+};
+const clawL = (o, swing, out, twist, elbow, pitch) => {
+  o.lShoulderSwing = swing; o.lShoulderOut = out; o.lShoulderTwist = twist; o.lElbow = elbow; o.daggerTilt = swing + elbow - pitch;
+};
+// 獲物を狙う低い構え（脚）
+const FSTANCE = (o) => bset(o, {
+  hipsPitch: 0.12, waistPitch: 0.25, neckPitch: -0.12, hipsX: 0,
+  lHipSwing: 0.3, lKnee: 0.65, lHipOut: 0.3, lFlat: 1, rHipSwing: -0.2, rKnee: 0.55, rHipOut: 0.3, rFlat: 1,
+});
+const fReady = (o) => { FSTANCE(o); clawR(o, 0.95, 0.4, 0.1, 1.1, 0.35); clawL(o, 0.95, 0.4, 0.1, 1.1, 0.35); };
+
+// 持ち歩き: 爪は下げて、構えでは両手を前へ
+export function carryFang(name, ctx, o) {
+  const t = ctx.time;
+  switch (name) {
+    case 'stand':
+      clawR(o, 0.25 + (o.rShoulderSwing - 0.03) * 0.5, 0.28, 0.1, 0.6, -0.45);
+      clawL(o, 0.25 + (o.lShoulderSwing + 0.03) * 0.5, 0.28, 0.1, 0.6, -0.45);
+      break;
+    case 'fight': { // 背をまるめ、爪を前へ。ゆらゆらと獲物をうかがう
+      const sway = sin(t * 2.6);
+      FSTANCE(o);
+      o.hipsRoll = 0.03 * sway; o.waistPitch += 0.02 * sway;
+      clawR(o, 0.95 + 0.06 * sway, 0.4, 0.1, 1.1, 0.35 + 0.1 * sway);
+      clawL(o, 0.95 - 0.06 * sway, 0.4, 0.1, 1.1, 0.35 - 0.1 * sway);
+      break;
+    }
+    case 'walk': case 'run': case 'crouch': case 'land': case 'air':
+      o.swordTilt = o.rShoulderSwing + o.rElbow + 0.45; // 腕の振りに合わせて、爪はいつも少し下向き
+      o.daggerTilt = o.lShoulderSwing + o.lElbow + 0.45;
+      break;
+    default:
+      break;
+  }
+}
+
+// ---- 通常1: 前方向への噛みつき。沈み込んで首をのばし、全身で飛びかかる。0.5 で噛む ----
+const F1 = [
+  { t: 0, pose: fReady },
+  { t: 0.2, ease: 'inout', pose: (o) => { // 反らして、爪を左右へ大きく開く（獲物に飛びかかる前のため）
+    FSTANCE(o);
+    bset(o, { hipsX: 0, hipsZ: -0.12, hipsPitch: 0.05, waistPitch: -0.12, neckPitch: -0.3, lKnee: 1.0, rKnee: 0.95, lHipSwing: 0.5, rHipSwing: 0.05 });
+    clawR(o, 0.5, 1.25, 0.0, 0.5, 0.5); clawL(o, 0.5, 1.25, 0.0, 0.5, 0.5);
+  } },
+  { t: 0.42, ease: 'in', pose: (o) => { // 一気に飛びかかる: 体が前へ倒れ、首が突き出る
+    FSTANCE(o);
+    bset(o, { hipsZ: 0.2, hipsPitch: 0.3, waistPitch: 0.7, neckPitch: -0.5, lHipSwing: 0.8, lKnee: 0.45, rHipSwing: -0.5, rKnee: 0.6, rFlat: 0.3 });
+    clawR(o, 1.55, 0.55, 0.0, 0.3, 0.2); clawL(o, 1.55, 0.55, 0.0, 0.3, 0.2);
+  } },
+  { t: 0.5, ease: 'out', pose: (o) => { // ガブッ: 顔が前へ。腕は獲物をつかむように
+    FSTANCE(o);
+    bset(o, { hipsZ: 0.26, hipsPitch: 0.34, waistPitch: 0.85, neckPitch: -0.55, lHipSwing: 0.85, lKnee: 0.4, rHipSwing: -0.55, rKnee: 0.55, rFlat: 0.2 });
+    clawR(o, 1.45, 0.3, 0.2, 0.55, 0.0); clawL(o, 1.45, 0.3, 0.2, 0.55, 0.0);
+  } },
+  { t: 0.62, ease: 'inout', pose: (o) => { // 噛んだまま、首をふる
+    FSTANCE(o);
+    bset(o, { hipsZ: 0.24, hipsPitch: 0.34, waistPitch: 0.85, neckPitch: -0.5, neckYaw: 0.35, neckRoll: 0.3, lHipSwing: 0.85, lKnee: 0.4, rHipSwing: -0.55, rKnee: 0.55, rFlat: 0.2 });
+    clawR(o, 1.4, 0.3, 0.2, 0.6, 0.0); clawL(o, 1.4, 0.3, 0.2, 0.6, 0.0);
+  } },
+  { t: 1, ease: 'out', pose: fReady },
+];
+const attackF1 = (ctx, o) => keyed(ctx.attackT, F1, o);
+
+// ---- 通常2: 爪での斜め薙ぎ払い（右上から左下へ）。0.46 で爪が獲物を通る ----
+const F2 = [
+  { t: 0, pose: fReady },
+  { t: 0.22, ease: 'inout', pose: (o) => { // 体を右へひねり、右の爪を頭の後ろへ引き上げる
+    FSTANCE(o);
+    bset(o, { hipsYaw: -0.4, waistYaw: -0.75, neckYaw: 0.9, hipsX: -0.08, waistPitch: 0.1, lKnee: 0.85, rKnee: 0.8 });
+    clawR(o, 2.55, 0.85, 0.0, 0.8, 1.2); clawL(o, 0.85, 0.55, 0.2, 1.0, 0.4);
+  } },
+  { t: 0.46, ease: 'in', pose: (o) => { // 踏み込んで、爪を左下へ振り下ろす
+    FSTANCE(o);
+    bset(o, { hipsYaw: 0.4, waistYaw: 0.7, neckYaw: -0.4, hipsZ: 0.14, waistPitch: 0.42, hipsPitch: 0.14, lHipSwing: -0.3, lKnee: 0.4, lFlat: 0.4, rHipSwing: 0.7, rKnee: 0.5, rFlat: 1 });
+    clawR(o, 1.1, -0.35, 0.3, 0.3, -0.35); clawL(o, 0.4, 0.8, 0.1, 0.8, 0.0);
+  } },
+  { t: 0.64, ease: 'out', pose: (o) => { // 振り抜き: 腕が体の左へ
+    FSTANCE(o);
+    bset(o, { hipsYaw: 0.65, waistYaw: 0.95, neckYaw: -0.8, hipsZ: 0.14, waistPitch: 0.5, hipsPitch: 0.16, lHipSwing: -0.35, lKnee: 0.45, lFlat: 0.3, rHipSwing: 0.8, rKnee: 0.6, rFlat: 1 });
+    clawR(o, 0.6, -0.8, 0.4, 0.5, -0.9); clawL(o, 0.4, 0.8, 0.1, 0.8, 0.0);
+  } },
+  { t: 1, ease: 'out', pose: fReady },
+];
+const attackF2 = (ctx, o) => keyed(ctx.attackT, F2, o);
+
+// ---- 通常3: 首に噛みつき、肉を引きちぎる。0.42 で噛みつき、0.64 で引きちぎる ----
+const F3 = [
+  { t: 0, pose: fReady },
+  { t: 0.2, ease: 'inout', pose: (o) => { // 深く沈んで、両腕を獲物へのばす
+    FSTANCE(o);
+    bset(o, { hipsZ: -0.05, hipsPitch: 0.2, waistPitch: 0.5, neckPitch: -0.3, lHipSwing: 0.6, lKnee: 1.05, rHipSwing: 0.1, rKnee: 1.0 });
+    clawR(o, 1.55, 0.75, 0.0, 0.4, 0.1); clawL(o, 1.55, 0.75, 0.0, 0.4, 0.1);
+  } },
+  { t: 0.38, ease: 'in', pose: (o) => { // 飛びついて、両腕で獲物を抱え込む。首は横にかしげる
+    FSTANCE(o);
+    bset(o, { hipsZ: 0.22, hipsPitch: 0.3, waistPitch: 0.75, neckPitch: -0.3, neckRoll: 0.5, neckYaw: 0.3, lHipSwing: 0.8, lKnee: 0.5, rHipSwing: -0.45, rKnee: 0.6, rFlat: 0.3 });
+    clawR(o, 1.3, 0.15, 0.4, 1.2, 0.5); clawL(o, 1.3, 0.15, 0.4, 1.2, 0.5);
+  } },
+  { t: 0.46, ease: 'out', pose: (o) => { // ガブリ: 首に牙を立てる
+    FSTANCE(o);
+    bset(o, { hipsZ: 0.26, hipsPitch: 0.34, waistPitch: 0.92, neckPitch: 0.1, neckRoll: 0.55, neckYaw: 0.3, lHipSwing: 0.85, lKnee: 0.45, rHipSwing: -0.5, rKnee: 0.6, rFlat: 0.3 });
+    clawR(o, 1.25, 0.1, 0.45, 1.3, 0.6); clawL(o, 1.25, 0.1, 0.45, 1.3, 0.6);
+  } },
+  { t: 0.56, ease: 'inout', pose: (o) => { // 食い込ませたまま、ぎりぎりと力をこめる
+    FSTANCE(o);
+    bset(o, { hipsZ: 0.26, hipsPitch: 0.36, waistPitch: 0.95, neckPitch: 0.12, neckRoll: 0.6, neckYaw: 0.45, lHipSwing: 0.85, lKnee: 0.5, rHipSwing: -0.5, rKnee: 0.65, rFlat: 0.3 });
+    clawR(o, 1.2, 0.1, 0.5, 1.4, 0.6); clawL(o, 1.2, 0.1, 0.5, 1.4, 0.6);
+  } },
+  { t: 0.68, ease: 'in', pose: (o) => { // 引きちぎる: 上体と首を後ろへ思い切りのけぞらせ、横へ振る
+    FSTANCE(o);
+    bset(o, { hipsZ: 0.0, hipsX: -0.1, hipsPitch: 0.0, waistPitch: -0.25, neckPitch: -0.55, neckRoll: -0.5, neckYaw: -0.7, waistYaw: -0.4, lHipSwing: 0.5, lKnee: 0.75, rHipSwing: -0.1, rKnee: 0.7, rFlat: 0.7 });
+    clawR(o, 0.7, 0.55, 0.2, 1.5, 0.9); clawL(o, 0.8, 0.55, 0.2, 1.4, 0.9);
+  } },
+  { t: 1, ease: 'out', pose: fReady },
+];
+const attackF3 = (ctx, o) => keyed(ctx.attackT, F3, o);
+
+// ---- ジャンプ中の爪（attackFAir）: 空中で3回、爪を振り下ろす。0.2 / 0.5 / 0.8 に爪が出る ----
+const airTuck = (o) => bset(o, { ground: 0, hipsPitch: 0.05, waistPitch: 0.2, neckPitch: -0.1, lHipSwing: 0.75, lKnee: 1.15, lHipOut: 0.2, lAnkle: -0.2, rHipSwing: 0.3, rKnee: 1.3, rHipOut: 0.2, rAnkle: -0.2 });
+const FAIR = [
+  { t: 0, pose: (o) => { airTuck(o); clawR(o, 2.2, 0.6, 0.0, 0.8, 1.2); clawL(o, 2.2, 0.6, 0.0, 0.8, 1.2); } },
+  { t: 0.2, ease: 'in', pose: (o) => { airTuck(o); bset(o, { waistYaw: 0.35, hipsYaw: 0.2, waistPitch: 0.35 }); clawR(o, 1.15, 0.0, 0.2, 0.3, -0.4); clawL(o, 2.2, 0.6, 0.0, 0.8, 1.2); } },
+  { t: 0.35, ease: 'out', pose: (o) => { airTuck(o); bset(o, { waistYaw: -0.3, hipsYaw: -0.15 }); clawR(o, 2.2, 0.6, 0.0, 0.8, 1.2); clawL(o, 2.2, 0.6, 0.0, 0.8, 1.2); } },
+  { t: 0.5, ease: 'in', pose: (o) => { airTuck(o); bset(o, { waistYaw: -0.35, hipsYaw: -0.2, waistPitch: 0.35 }); clawL(o, 1.15, 0.0, 0.2, 0.3, -0.4); clawR(o, 2.2, 0.6, 0.0, 0.8, 1.2); } },
+  { t: 0.65, ease: 'out', pose: (o) => { airTuck(o); bset(o, { waistYaw: 0.3, hipsYaw: 0.15 }); clawR(o, 2.2, 0.6, 0.0, 0.8, 1.2); clawL(o, 2.2, 0.6, 0.0, 0.8, 1.2); } },
+  { t: 0.8, ease: 'in', pose: (o) => { airTuck(o); bset(o, { waistYaw: 0.4, hipsYaw: 0.25, waistPitch: 0.4 }); clawR(o, 1.1, 0.0, 0.2, 0.25, -0.5); clawL(o, 2.2, 0.6, 0.0, 0.8, 1.2); } },
+  { t: 1, ease: 'out', pose: (o) => { airTuck(o); clawR(o, 1.5, 0.5, 0.1, 0.6, 0.2); clawL(o, 1.5, 0.5, 0.1, 0.6, 0.2); } },
+];
+const attackFAir = (ctx, o) => keyed(ctx.attackT, FAIR, o);
+
+// ---- スキル1: 爪を赤く染める（両手を顔の前でこすり合わせ、爪を高くかかげる）----
+const fangRaise = (ctx, o) => {
+  const t = ctx.attackT;
+  const up = smooth(t / 0.7);
+  FSTANCE(o);
+  bset(o, { waistPitch: 0.25 - 0.3 * up, neckPitch: -0.1 - 0.35 * up, lKnee: 0.65 + 0.2 * up, rKnee: 0.55 + 0.2 * up });
+  clawR(o, 1.0 + 1.2 * up, 0.4 + 0.5 * up, 0.1, 1.1 - 0.4 * up, 0.5 + 0.7 * up + 0.05 * sin(ctx.time * 30));
+  clawL(o, 1.0 + 1.2 * up, 0.4 + 0.5 * up, 0.1, 1.1 - 0.4 * up, 0.5 + 0.7 * up - 0.05 * sin(ctx.time * 30));
+};
+
+// ---- スキル1: 薙ぎ払い。attackT 0 → 1 で、0.4 に爪を振り抜いて斬撃が出る ----
+const SWEEPA = [ // 右爪: 右上から左下へ斜めに
+  { t: 0, pose: (o) => { FSTANCE(o); bset(o, { waistYaw: -0.55, hipsYaw: -0.3, neckYaw: 0.7 }); clawR(o, 2.4, 0.8, 0.0, 0.9, 1.1); clawL(o, 0.8, 0.5, 0.2, 1.0, 0.4); } },
+  { t: 0.4, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { waistYaw: 0.6, hipsYaw: 0.35, neckYaw: -0.35, hipsZ: 0.1, waistPitch: 0.4, lHipSwing: 0.5, lKnee: 0.5 }); clawR(o, 1.1, -0.35, 0.3, 0.3, -0.4); clawL(o, 0.4, 0.8, 0.1, 0.8, 0.0); } },
+  { t: 1, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { waistYaw: 0.9, hipsYaw: 0.5, neckYaw: -0.6, hipsZ: 0.1, waistPitch: 0.45, lHipSwing: 0.5, lKnee: 0.55 }); clawR(o, 0.6, -0.8, 0.4, 0.5, -0.9); clawL(o, 0.4, 0.8, 0.1, 0.8, 0.0); } },
+];
+const fangSweep1 = (ctx, o) => keyed(ctx.attackT, SWEEPA, o);
+const fangSweep2 = (ctx, o) => { keyed(ctx.attackT, SWEEPA, o); mirrorPose(o); }; // 左爪: 左上から右下へ
+const SWEEPC = [ // 両腕を水平に大きく薙ぐ
+  { t: 0, pose: (o) => { FSTANCE(o); bset(o, { waistYaw: -0.8, hipsYaw: -0.4, neckYaw: 0.95, lKnee: 0.8, rKnee: 0.8 }); clawR(o, 1.55, 1.3, 0.0, 0.4, 0.2); clawL(o, 1.55, 1.3, 0.0, 0.4, 0.2); } },
+  { t: 0.4, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { waistYaw: 0.7, hipsYaw: 0.4, neckYaw: -0.4, hipsZ: 0.12, waistPitch: 0.4, lHipSwing: 0.55, lKnee: 0.5 }); clawR(o, 1.5, 0.2, 0.3, 0.2, 0.0); clawL(o, 1.5, 0.2, 0.3, 0.2, 0.0); } },
+  { t: 1, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { waistYaw: 1.0, hipsYaw: 0.5, neckYaw: -0.7, hipsZ: 0.12, waistPitch: 0.45, lHipSwing: 0.55, lKnee: 0.55 }); clawR(o, 1.5, -0.3, 0.4, 0.4, 0.0); clawL(o, 1.4, 0.6, 0.3, 0.4, 0.0); } },
+];
+const fangSweep3 = (ctx, o) => keyed(ctx.attackT, SWEEPC, o);
+
+// ---- 蝙蝠になる前・戻ったあと: 両腕を顔の前で交差させ、体をちぢめる（マントに包まれる）----
+const fangMorph = (ctx, o) => {
+  const k = sin(clamp01(ctx.attackT) * PI);
+  FSTANCE(o);
+  bset(o, { hipsPitch: 0.2 + 0.15 * k, waistPitch: 0.5 + 0.4 * k, neckPitch: 0.3 * k, lKnee: 0.9 + 0.3 * k, rKnee: 0.85 + 0.3 * k, hipsRoll: 0.04 * sin(ctx.time * 45) * k });
+  clawR(o, 2.0, -0.6 * k, 0.5, 2.0, 0.3); clawL(o, 2.0, -0.6 * k, 0.5, 2.0, 0.3);
+};
+
+// ---- スキル4: 足を蝙蝠にして宙に浮き、腕を大きく広げて回る ----
+const fangSpin = (ctx, o) => {
+  o.ground = 0;
+  o.lift = 1.4;
+  bset(o, { hipsPitch: 0.1, waistPitch: 0.3, neckPitch: 0.0, lHipSwing: 0.1, lKnee: 0.25, lHipOut: 0.25, lAnkle: -0.4, rHipSwing: -0.1, rKnee: 0.3, rHipOut: 0.25, rAnkle: -0.4 });
+  const flutter = 0.08 * sin(ctx.time * 22);
+  clawR(o, 1.5, 1.45 + flutter, 0.0, 0.15, 0.0); clawL(o, 1.5, 1.45 - flutter, 0.0, 0.15, 0.0);
+};
+
+// ---- 着地・再登場のため: 沈み込んで、ゆっくり構えへ（attackT 0 → 1）----
+const fangLand = (ctx, o) => {
+  const u = smooth(ctx.attackT);
+  fReady(o);
+  bset(o, { waistPitch: 0.25 + 0.5 * (1 - u), hipsPitch: 0.12 + 0.2 * (1 - u), lKnee: 0.65 + 0.5 * (1 - u), rKnee: 0.55 + 0.5 * (1 - u) });
+};
+
+// ---- 必殺技: 凶暴化（背を丸め、牙をむいて咆哮。attackT 0 → 1。震えながら爪を広げる）----
+const fangBerserk = (ctx, o) => {
+  const t = clamp01(ctx.attackT);
+  const k = smooth(t / 0.6);
+  const sh = 0.05 * sin(ctx.time * 55) * (0.4 + k);
+  FSTANCE(o);
+  bset(o, { hipsPitch: 0.3 * k, waistPitch: 0.55 * k - 0.2 * smooth((t - 0.55) / 0.3), neckPitch: -0.7 * smooth((t - 0.35) / 0.4), hipsX: sh, lKnee: 0.65 + 0.5 * k, rKnee: 0.55 + 0.5 * k, lHipOut: 0.3 + 0.2 * k, rHipOut: 0.3 + 0.2 * k, waistRoll: sh });
+  const open = smooth((t - 0.35) / 0.4);
+  clawR(o, 0.9 + 0.4 * open, 0.5 + 0.9 * open, 0.0, 0.9 - 0.4 * open, 0.3 + 0.5 * open);
+  clawL(o, 0.9 + 0.4 * open, 0.5 + 0.9 * open, 0.0, 0.9 - 0.4 * open, 0.3 + 0.5 * open);
+};
+
+// ---- 必殺技: 重い牙の一撃。0.5 で噛みつく（attackT 0 → 1）----
+const FSTRIKE = [
+  { t: 0, pose: (o) => { FSTANCE(o); bset(o, { waistPitch: 0.6, hipsPitch: 0.3, lKnee: 1.1, rKnee: 1.05 }); clawR(o, 1.3, 1.4, 0.0, 0.5, 0.5); clawL(o, 1.3, 1.4, 0.0, 0.5, 0.5); } },
+  { t: 0.3, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: -0.15, waistPitch: -0.2, hipsPitch: 0.1, neckPitch: -0.5, lKnee: 1.2, rKnee: 1.15, lHipSwing: 0.6 }); clawR(o, 0.4, 1.5, 0.0, 0.5, 0.6); clawL(o, 0.4, 1.5, 0.0, 0.5, 0.6); } },
+  { t: 0.5, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: 0.3, hipsPitch: 0.4, waistPitch: 1.0, neckPitch: 0.0, neckRoll: 0.5, neckYaw: 0.25, lHipSwing: 0.9, lKnee: 0.4, rHipSwing: -0.55, rKnee: 0.6, rFlat: 0.2 }); clawR(o, 1.4, 0.1, 0.4, 1.2, 0.5); clawL(o, 1.4, 0.1, 0.4, 1.2, 0.5); } },
+  { t: 0.7, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: 0.3, hipsPitch: 0.4, waistPitch: 1.05, neckPitch: 0.1, neckRoll: 0.6, neckYaw: 0.5, lHipSwing: 0.9, lKnee: 0.45, rHipSwing: -0.55, rKnee: 0.65, rFlat: 0.2 }); clawR(o, 1.3, 0.1, 0.5, 1.3, 0.5); clawL(o, 1.3, 0.1, 0.5, 1.3, 0.5); } },
+  { t: 1, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: 0.2, waistPitch: 0.8, hipsPitch: 0.3, neckPitch: -0.2, lKnee: 0.8, rKnee: 0.7 }); clawR(o, 1.0, 0.6, 0.2, 0.9, 0.2); clawL(o, 1.0, 0.6, 0.2, 0.9, 0.2); } },
+];
+const attackFStrike = (ctx, o) => keyed(ctx.attackT, FSTRIKE, o);
+
+// ---- 敵: 「ここはどこだ」とあたふたして、まわりを見回す（時間 ctx.time で動く）----
+const lookAround = (ctx, o) => {
+  const t = ctx.time;
+  const head = sin(t * 2.6) * 1.1 + 0.3 * sin(t * 5.3);
+  bset(o, { hipsYaw: 0.25 * sin(t * 2.6 - 0.6), waistYaw: 0.35 * sin(t * 2.6 - 0.3), neckYaw: head, neckPitch: -0.05 + 0.18 * sin(t * 3.1), hipsRoll: 0.05 * sin(t * 4), waistPitch: 0.06,
+    lHipSwing: 0.25, lKnee: 0.4, lHipOut: 0.25, lFlat: 1, rHipSwing: -0.1, rKnee: 0.35, rHipOut: 0.25, rFlat: 1 });
+  const wave = 0.5 + 0.5 * sin(t * 5.2);
+  bset(o, { lShoulderSwing: 0.9 + 0.4 * wave, lShoulderOut: 0.9, lShoulderTwist: 0.3, lElbow: 1.2, rShoulderSwing: 1.1 - 0.4 * wave, rShoulderOut: 0.9, rShoulderTwist: 0.3, rElbow: 1.2 });
+  bset(o, { hipsX: 0.05 * sin(t * 2.6) });
+};
+
 export const POSES = {
+  attackF1, attackF2, attackF3, attackFAir, attackFStrike, fangRaise, fangSweep1, fangSweep2, fangSweep3, fangMorph, fangSpin, fangLand, fangBerserk, lookAround,
   attackB1, attackB2, attackB3, attackBP, attackBQ, batCall, batPitch, batPitchL, batBallDraw, batHaymaker, batCatch, batToss, batLeap, batSmash,
   ultDraw, ultThrow, ultSummon, ultWindup, ultDash, ultFinish, ultLeap, ultLand,
   stunned, lungeAim, lungeDash, lungeStrike,

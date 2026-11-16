@@ -19,7 +19,8 @@ export class Sparks {
 
   // pos から dir の方向を中心に count 個飛ばす
   // hue を省くと金色の火花。lightness を上げると白い破片や土煙になる
-  burst(pos, dir, count, size, speed, hue = null, sat = 1) {
+  // lightness / lightRange: 明るさの下限と幅（暗い赤い血しぶきなら 0.38 / 0.2）
+  burst(pos, dir, count, size, speed, hue = null, sat = 1, lightness = 0.6, lightRange = 0.35) {
     for (let i = 0; i < count; i++) {
       const it = this.items[this.next];
       this.next = (this.next + 1) % COUNT;
@@ -31,7 +32,7 @@ export class Sparks {
       ).multiplyScalar(speed * (0.5 + Math.random()));
       it.max = it.life = 0.22 + Math.random() * 0.2;
       it.size = size * (0.6 + Math.random() * 0.8);
-      it.mesh.material.color.setHSL(hue ?? 0.11 + Math.random() * 0.05, sat, 0.6 + Math.random() * 0.35);
+      it.mesh.material.color.setHSL(hue ?? 0.11 + Math.random() * 0.05, sat, lightness + Math.random() * lightRange);
       it.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
       it.mesh.scale.setScalar(it.size); // 出した直後のコマでも正しい大きさで描く
       it.mesh.visible = true;

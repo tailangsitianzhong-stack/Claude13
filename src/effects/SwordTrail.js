@@ -10,8 +10,10 @@ const b = new THREE.Vector3();
  * シーンへの追加は呼び出し側で行う（trail.mesh）。
  */
 export class SwordTrail {
-  constructor(sword) {
+  // tint: [r,g,b]（0〜1）を渡すと、軌跡をその色にする（吸血牙の爪は赤）
+  constructor(sword, tint = null) {
     this.sword = sword;
+    this.tint = tint;
     this.samples = []; // { base, tip, age }
     this.positions = new Float32Array(MAX * 2 * 3);
     this.colors = new Float32Array(MAX * 2 * 4);
@@ -51,7 +53,12 @@ export class SwordTrail {
       const alpha = Math.max(0, 1 - s.age / LIFE);
       this.positions.set([s.base.x, s.base.y, s.base.z, s.tip.x, s.tip.y, s.tip.z], i * 6);
       // 根元側は透明な水色、先端側ほど明るい。消え際は青みが残る
-      this.colors.set([0.2, 0.7, 1, 0, 0.45 + 0.55 * alpha, 0.85 + 0.15 * alpha, 1, alpha * alpha * 0.38], i * 8);
+      if (this.tint) {
+        const [r, g, b] = this.tint;
+        this.colors.set([r * 0.7, g * 0.7, b * 0.7, 0, r + (1 - r) * 0.45 * alpha, g + (1 - g) * 0.3 * alpha, b + (1 - b) * 0.3 * alpha, alpha * alpha * 0.5], i * 8);
+      } else {
+        this.colors.set([0.2, 0.7, 1, 0, 0.45 + 0.55 * alpha, 0.85 + 0.15 * alpha, 1, alpha * alpha * 0.38], i * 8);
+      }
     }
     const geo = this.mesh.geometry;
     geo.attributes.position.needsUpdate = true;

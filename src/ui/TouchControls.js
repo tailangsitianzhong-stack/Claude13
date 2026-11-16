@@ -222,6 +222,23 @@ const BAT_ICONS = {
   ult: svgWrap('', `<circle cx="32" cy="34" r="18" fill="#3b4150" stroke="#6a1200" stroke-width="3"/><ellipse cx="32" cy="34" rx="18" ry="6" fill="none" stroke="#aab6c8" stroke-width="3"/><circle cx="25" cy="27" r="4" fill="#fff" opacity="0.7"/><polygon points="32,2 35,12 46,8 40,17 52,20 41,24 50,32 38,29 32,40" fill="#fff59d" stroke="#6a1200" stroke-width="2" opacity="0.95"/>`),
 };
 
+// ---- 吸血牙用のアイコン ----
+const BATWING = (cx, cy, k, fill = '#2a1230', edge = '#ffd1d8') => `<g transform="translate(${cx} ${cy}) scale(${k})"><path d="M0 -2 L-14 -10 L-12 -1 L-8 -3 L-5 3 L-2 1 L0 6 L2 1 L5 3 L8 -3 L12 -1 L14 -10 Z" fill="${fill}" stroke="${edge}" stroke-width="2"/><circle cx="-1.6" cy="-1" r="0.9" fill="#ff3050"/><circle cx="1.6" cy="-1" r="0.9" fill="#ff3050"/></g>`;
+const FANG_ICONS = {
+  // 通常攻撃: 牙をむいた口
+  attack: svgWrap('', `<path d="M6 26 Q32 6 58 26 L52 36 L46 30 L40 40 L34 32 L32 44 L30 32 L24 40 L18 30 L12 36 Z" fill="#fff" stroke="#5a0010" stroke-width="2.6"/><path d="M12 36 Q32 56 52 36 L46 30 L40 40 L34 32 L32 44 L30 32 L24 40 L18 30 Z" fill="#c0172c" stroke="#5a0010" stroke-width="2.6"/>`),
+  // スキル1: 赤い三本の爪痕
+  skill1: svgWrap('icon-main', `<path d="M14 6 Q26 30 22 58 M30 4 Q42 30 38 60 M46 8 Q56 32 52 58" fill="none" stroke="#ff2a44" stroke-width="7"/><path d="M14 6 Q26 30 22 58 M30 4 Q42 30 38 60 M46 8 Q56 32 52 58" fill="none" stroke="#fff" stroke-width="2.4"/>`),
+  // スキル3: 小さな体（蝙蝠の群れ）
+  skill3: svgWrap('icon-alt', `${BATWING(18, 20, 0.9)}${BATWING(46, 16, 0.8)}${BATWING(32, 38, 1.1)}${BATWING(14, 52, 0.7)}${BATWING(52, 50, 0.75)}`),
+  // スキル2: 巨大蝙蝠
+  skill2: svgWrap('icon-main', `${BATWING(32, 32, 2.0, '#35123f', '#ffd1d8')}`),
+  // スキル4: 足の蝙蝠化と回転
+  skill4: svgWrap('icon-alt', `<path d="M10 28 A22 22 0 0 1 48 16 M54 36 A22 22 0 0 1 16 48" fill="none" stroke="#ff4a5e" stroke-width="5"/><polygon points="50,8 52,22 38,17" fill="#ff4a5e"/><polygon points="14,56 12,42 26,47" fill="#ff4a5e"/>${BATWING(32, 32, 1.15)}`),
+  // 必殺技: 赤い宝石
+  ult: svgWrap('', `<polygon points="32,4 50,24 32,60 14,24" fill="#d1062a" stroke="#4a0010" stroke-width="3"/><polygon points="32,4 50,24 14,24" fill="#ff5a70" stroke="#4a0010" stroke-width="2.4"/><polygon points="32,24 50,24 32,60" fill="#9a0420"/><polygon points="22,18 28,12 30,20" fill="#fff" opacity="0.8"/>`),
+};
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -374,18 +391,19 @@ export class TouchControls {
 
   // 武器に合わせて、ボタンのアイコンを入れ替える（'sword' は最初のまま。'bat' はバット用）
   setWeapon(id) {
-    if (id !== 'bat') return;
+    const ICONS = id === 'bat' ? BAT_ICONS : id === 'fang' ? FANG_ICONS : null;
+    if (!ICONS) return;
     const swap = (sel, icon, svgSel = 'svg') => {
       const el = this.root.querySelector(sel);
       const old = svgSel === 'svg' ? el.querySelector('svg') : el.querySelector(svgSel);
       if (old) old.outerHTML = icon;
     };
-    swap('#attack-btn', BAT_ICONS.attack);
-    swap('#skill-btn', BAT_ICONS.skill1, 'svg.icon-main');
-    swap('#skill-btn', BAT_ICONS.skill3, 'svg.icon-alt');
-    swap('#skill2-btn', BAT_ICONS.skill2, 'svg.icon-main');
-    swap('#skill2-btn', BAT_ICONS.skill4, 'svg.icon-alt');
-    swap('#ult-btn', BAT_ICONS.ult);
+    swap('#attack-btn', ICONS.attack);
+    swap('#skill-btn', ICONS.skill1, 'svg.icon-main');
+    swap('#skill-btn', ICONS.skill3, 'svg.icon-alt');
+    swap('#skill2-btn', ICONS.skill2, 'svg.icon-main');
+    swap('#skill2-btn', ICONS.skill4, 'svg.icon-alt');
+    swap('#ult-btn', ICONS.ult);
   }
 
   // 必殺技ボタン: ゲージがたまっている間だけ出す

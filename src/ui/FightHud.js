@@ -29,6 +29,7 @@ const CSS = `
   -webkit-text-stroke: 4px #1b1b30; text-shadow: 0 2px 0 #1b1b30; white-space: nowrap; }
 #dmg-layer .dmg.big { font-size: 30px; color: #ffe066; }
 #dmg-layer .dmg.huge { font-size: 42px; color: #ff6a3d; }
+#dmg-layer .dmg.heal { font-size: 26px; color: #7dff9a; -webkit-text-stroke: 4px #0b3a1a; text-shadow: 0 2px 0 #0b3a1a; }
 #fight-banner { position: fixed; left: 50%; top: 52%; transform: translate(-50%, -50%) scale(1); z-index: 14; pointer-events: none; text-align: center;
   font: 900 min(15vw, 64px)/1 system-ui, sans-serif; color: #fff; -webkit-text-stroke: 5px #b3261e; paint-order: stroke fill; letter-spacing: 4px;
   text-shadow: 0 6px 0 #5a0f0a; opacity: 0; }
@@ -117,7 +118,7 @@ export class FightHud {
     while (this.pops.length >= limit) { const old = this.pops.shift(); old.el.remove(); }
     const el = document.createElement('div');
     el.className = `dmg ${kind}`;
-    el.textContent = Math.round(amount);
+    el.textContent = kind === 'heal' ? '+' + Math.round(amount) : Math.round(amount);
     this.layer.appendChild(el);
     this.pops.push({ el, pos: pos.clone(), t: 0, life: kind === 'huge' ? 1.3 : 0.85, dx: (Math.random() - 0.5) * 40 });
   }
