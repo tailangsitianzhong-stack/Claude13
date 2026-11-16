@@ -184,7 +184,7 @@ export class FangUltimateDirector {
       case 'ultBite': {
         // 重い牙の一撃: あごが首にがぶりと食らいつく。体力を最大の30%回復
         v.set(p2.group.position.x, H * 0.8, p2.group.position.z);
-        fang.jaw(v, fang.jawHeading(w.set(1, 0, 0)), H * 2.0, { open: 1.0, tilt: 0.0, dur: 0.9, snap: 0.35 });
+        fang.jaw(v, Math.PI / 2, H * 2.0, { open: 1.0, tilt: 0.0, dur: 0.9, snap: 0.35 });
         hooks.damage(DAMAGE.fangUltBite, v, 'huge');
         hooks.hitStop(0.28);
         hooks.flashFoe(0.25);

@@ -31,7 +31,7 @@ function createJaw() {
       fang.position.set(a * 1.05, up ? 0.3 - size / 2 : -0.3 + size / 2, z);
       fang.rotation.x = up ? Math.PI : 0;       // 上あごは下向き、下あごは上向き
       hinge.add(fang);
-      const gum = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.07, 0.3), gumMat);
+      const gum = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.2), gumMat);
       gum.position.set(a * 1.05, up ? 0.38 : -0.38, z);
       hinge.add(gum);
     }
@@ -118,7 +118,9 @@ export class FangDirector {
       const near = Math.hypot(dx, dz) < 9 * S && (dx * Math.sin(h) + dz * Math.cos(h)) > 0;
       if (near) v.set(p2.group.position.x, p2.height * 0.66, p2.group.position.z);
       else v.set(p1.group.position.x + Math.sin(h) * 5 * S, p1.height * 0.62, p1.group.position.z + Math.cos(h) * 5 * S);
-      this.jaw(v, this.jawHeading(w.set(Math.sin(near ? Math.atan2(dx, dz) : h), 0, Math.cos(near ? Math.atan2(dx, dz) : h))), p2.height * 1.5, { open: 1.0, tilt: 0 }); // 横向きに開いて、カメラから牙が並んで見えるように
+      const bh = near ? Math.atan2(dx, dz) : h;
+      v.x += Math.sin(bh) * 0.25 * p2.height; v.z += Math.cos(bh) * 0.25 * p2.height; v.y += 0.1 * p2.height; // 相手の少し先まで噛みつく
+      this.jaw(v, bh, p2.height * 1.35, { open: 0.7, tilt: 0 }); // 噛みつく向き（前）へ、口を開く
       fx.zoom(80); fx.kick(0, -0.2, 0.8); fx.shake(0.25);
     } else if (e.index === 1) {
       // 爪の薙ぎ払い: 右上から左下へ、赤い三日月が走る
@@ -295,7 +297,7 @@ export class FangDirector {
       case 'fangNeckBite': {
         const h = Math.atan2(e.dir.x, e.dir.z);
         v.set(p2.group.position.x, p2.height * 0.8, p2.group.position.z);
-        this.jaw(v, this.jawHeading(e.dir), H * 1.3, { open: 0.9, tilt: 0.2, dur: 0.5, snap: 0.3 });
+        this.jaw(v, Math.atan2(e.dir.x, e.dir.z), H * 1.3, { open: 0.9, tilt: 0.0, dur: 0.5, snap: 0.3 });
         sparks.burst(v, e.dir, 10, H * 0.05, H * 2.6, ...BLOOD);
         fx.shake(0.4); fx.zoom(-80);
         break;
