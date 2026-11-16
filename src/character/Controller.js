@@ -6,6 +6,7 @@ export const MOVE = {
   runSpeed: 12,
   accel: 45,          // 加速
   decel: 60,          // 減速
+  brakeDecel: 30,     // 走りから止まるときの減速（少し滑って止まる）
   airControl: 0.35,   // 空中での加減速の効き
   turnRate: 14,       // 向きを変える速さ
   walkStride: 3.9,    // 歩き1周期（2歩）で進む距離 → 足が滑って見えないよう位相を距離に同期
@@ -46,14 +47,14 @@ export const FINISHER = {
   range: 12,        // 相手がこの距離以内なら掴める（リグ単位）
   holdDist: 2.1,    // 掴んでいる間の相手との間隔
   dash: 0.1,        // 相手の目の前まで詰める時間（秒）
-  grip: 0.16,       // 胸ぐらを掴んで止まる時間
+  grip: 0.26,       // 胸ぐらを掴み、沈み込んで跳ぶ力をためる時間
   rise: 0.5,        // 持ち上げて跳ぶ時間
   height: 15,       // 跳び上がる高さ（リグ単位。身長の約3倍）
-  throwTime: 0.22,  // 空中で投げ下ろす動きの長さ
-  release: 0.1,     // そのうち、手を離す瞬間
+  throwTime: 0.32,  // 空中で振りかぶって投げ下ろす動きの長さ
+  release: 0.17,    // そのうち、手を離す瞬間
   fall: 0.14,       // 相手が地面に届くまでの時間
   throwDist: 3.6,   // 相手を叩きつける地点（自分の真下から前方へ）
-  pause: 0.1,       // 相手が地面に当たってから、剣で追撃に入るまでの間
+  pause: 0.14,      // 相手が地面に当たってから、剣で追撃に入るまでの間
 };
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
 
@@ -188,7 +189,7 @@ export class CharacterController {
     v.vx = v.vz = v.vy = 0;
     v.attackActive = false;
     vg.rotation.y = Math.atan2(-fx, -fz); // 掴まれた側は相手の方を向く
-    v.c.animator.play('limp', 0.08);
+    v.c.animator.play('struggle', 0.08);
     this.events.push({ type: 'finisherGrab' });
   }
 
@@ -202,6 +203,10 @@ export class CharacterController {
       group.position.y + lift * S,
       group.position.z + f.fz * FINISHER.holdDist * S,
     );
+    // もがいて体ごと暴れる
+    const t = this.victim.c.animator.time;
+    vg.rotation.x = 0.16 * Math.sin(t * 17);
+    vg.rotation.z = 0.13 * Math.sin(t * 12.3 + 1);
   }
 
   updateFinisher(dt) {
@@ -220,11 +225,12 @@ export class CharacterController {
       if (k >= 1) { f.phase = 'grip'; f.t = 0; this.events.push({ type: 'finisherGrip' }); }
     } else if (f.phase === 'grip') {
       // 胸ぐらを掴んで少し持ち上げる
-      this.carryVictim(0.7 * Math.min(1, f.t / F.grip));
+      this.carryVictim(0.7 * Math.min(1, f.t / (F.grip * 0.5)));
+      if (f.t >= F.grip * 0.35) animator.play('liftCrouch', 0.14); // 掴んだまま沈み込む
       if (f.t >= F.grip) {
         f.phase = 'rise';
         f.t = 0;
-        animator.play('carry', 0.08);
+        animator.play('carry', 0.12);
         this.events.push({ type: 'finisherJump' });
       }
     } else if (f.phase === 'rise') {
@@ -236,7 +242,7 @@ export class CharacterController {
         f.phase = 'throw';
         f.t = 0;
         animator.attackT = 0;
-        animator.play('throw', 0.05);
+        animator.play('throw', 0.1);
       }
     } else if (f.phase === 'throw') {
       animator.attackT = Math.min(1, f.t / F.throwTime);
@@ -252,6 +258,7 @@ export class CharacterController {
             f.throwTo.x = Math.min(b.maxX - 0.3, Math.max(b.minX + 0.3, f.throwTo.x));
             f.throwTo.z = Math.min(b.maxZ - 0.3, Math.max(b.minZ + 0.3, f.throwTo.z));
           }
+          vg.rotation.z = 0;
           v.state = 'thrown';
           v.c.animator.play('thrown', 0.05);
           this.events.push({ type: 'finisherThrow' });
@@ -313,7 +320,8 @@ export class CharacterController {
     // 倒れた姿勢からは自然に起き上がる
     if (this.state !== 'held' && this.state !== 'thrown' && this.state !== 'down' && group.rotation.x !== 0) {
       group.rotation.x *= Math.exp(-9 * dt);
-      if (Math.abs(group.rotation.x) < 0.01) group.rotation.x = 0;
+      group.rotation.z *= Math.exp(-9 * dt);
+      if (Math.abs(group.rotation.x) < 0.01) { group.rotation.x = 0; group.rotation.z = 0; }
     }
 
     // 掴まれている・投げられている間は、相手側が位置と姿勢を動かす
@@ -344,7 +352,11 @@ export class CharacterController {
     const control = this.state === 'air' ? MOVE.airControl : this.state === 'ground' ? 1 : 0.5;
     let tx = moving ? cmd.x * topSpeed : 0;
     let tz = moving ? cmd.z * topSpeed : 0;
-    let rate = (moving ? MOVE.accel : MOVE.decel) * S * control * dt;
+    const braking = !moving && animator.name === 'brake';
+    let rate = (moving ? MOVE.accel : braking ? MOVE.brakeDecel : MOVE.decel) * S * control * dt;
+    const pvx = this.vx;
+    const pvz = this.vz;
+    const pYaw = group.rotation.y;
     if (this.state === 'attack') {
       // 攻撃中は歩けない。踏み込みの区間だけ、向いている方へ進む
       const [from, to, lungeSpeed] = ATTACKS[this.attackIndex].lunge;
@@ -404,6 +416,19 @@ export class CharacterController {
     }
 
     const speed = Math.hypot(this.vx, this.vz) / S; // リグ単位
+
+    // 慣性の傾き: 地上で加速すると前のめり、減速するとのけぞり、曲がると内側へ倒れる
+    if (this.state === 'ground' && dt > 0) {
+      const fwdX = Math.sin(group.rotation.y);
+      const fwdZ = Math.cos(group.rotation.y);
+      const accel = ((this.vx - pvx) * fwdX + (this.vz - pvz) * fwdZ) / dt / S; // リグ単位/秒²
+      animator.leanTarget = Math.max(-0.3, Math.min(0.3, accel / MOVE.accel * 0.26));
+      const turn = angleDiff(group.rotation.y, pYaw) / dt;
+      animator.bankTarget = Math.max(-0.28, Math.min(0.28, turn * 0.022 * Math.min(1, speed / MOVE.walkSpeed)));
+    } else {
+      animator.leanTarget = 0;
+      animator.bankTarget = 0;
+    }
     const running = speed > MOVE.walkSpeed * 1.25;
 
     // 歩き・走りの位相は進んだ距離に比例して進める
@@ -420,11 +445,18 @@ export class CharacterController {
           animator.play('crouch', 0.07);
         } else if (cmd.attack && this.c.sword) {
           this.startAttack(0, cmd);
+        } else if (!moving && speed > 0.4 && (animator.name === 'run' || animator.name === 'brake')) {
+          // 走りから入力を離した: 足を突っ張って滑りながら止まる
+          if (animator.name !== 'brake') this.events.push({ type: 'brake' });
+          animator.play('brake', 0.1);
         } else if (speed > 0.4) {
           if (animator.name === 'stand' || animator.name === 'fight') animator.phase = 0; // 歩き出しは左足から
-          animator.play(running ? 'run' : 'walk', 0.18);
+          animator.play(running ? 'run' : 'walk', animator.name === 'brake' ? 0.12 : 0.18);
         } else {
-          animator.play(this.idle, 0.22);
+          // 立ちへ戻る。攻撃・着地・急停止のあとは、ゆっくり構え直して少し揺り戻す
+          const from = animator.name;
+          const recover = from.startsWith('attack') || from === 'land' || from === 'brake' || from === 'hit';
+          animator.play(this.idle, recover ? 0.38 : 0.22, recover);
         }
         break;
       }

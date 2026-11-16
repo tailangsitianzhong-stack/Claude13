@@ -18,6 +18,13 @@ export class Animator {
     this.attackT = 0;        // 攻撃モーションの進み具合 0 → 1
     this.hitT = 0;           // 被弾モーションの進み具合 0 → 1
     this.trailOn = false;    // 剣の軌跡を出している最中か
+    this.lean = 0;           // 慣性による前後の傾き（現在値）。leanTarget へバネのように追従する
+    this.bank = 0;           // 慣性による左右の傾き
+    this.leanTarget = 0;
+    this.bankTarget = 0;
+    this.leanV = 0;
+    this.bankV = 0;
+    this.settle = false;
     this.group = group;
     this.joints = joints;
     this.soles = soles;
@@ -39,9 +46,11 @@ export class Animator {
     this.apply(this.pose);
   }
 
-  play(name, fade = 0.15) {
+  // settle: true にすると、目標の姿勢を少し行き過ぎてから戻る（構え直すときの「揺り戻し」）
+  play(name, fade = 0.15, settle = false) {
     if (name === this.name) return;
     this.name = name;
+    this.settle = settle;
     copyPose(this.from, this.pose);
     this.fade = fade > 0 ? 0 : 1;
     this.fadeTime = fade;
@@ -56,6 +65,12 @@ export class Animator {
 
   update(dt) {
     this.time += dt;
+    // 傾きは少し揺れながら目標へ落ち着くバネ（止まった直後に体が揺り戻す）
+    const h = Math.min(dt, 0.033);
+    this.leanV += ((this.leanTarget - this.lean) * 140 - this.leanV * 15) * h;
+    this.lean += this.leanV * h;
+    this.bankV += ((this.bankTarget - this.bank) * 140 - this.bankV * 17) * h;
+    this.bank += this.bankV * h;
     if (this.debug) {
       const d = this.debug;
       const saved = [this.phase, this.airU, this.time, this.attackT, this.hitT];
@@ -72,7 +87,9 @@ export class Animator {
     this.evaluate(this.name, this.target);
     if (this.fade < 1) {
       this.fade = Math.min(1, this.fade + dt / this.fadeTime);
-      const k = this.fade * this.fade * (3 - 2 * this.fade);
+      const f = this.fade;
+      const c = 1.35; // 行き過ぎの強さ
+      const k = this.settle ? 1 + (c + 1) * Math.pow(f - 1, 3) + c * Math.pow(f - 1, 2) : f * f * (3 - 2 * f);
       lerpPose(this.pose, this.from, this.target, k);
     } else {
       copyPose(this.pose, this.target);
@@ -83,9 +100,12 @@ export class Animator {
   apply(p) {
     const j = this.joints;
 
-    j.hips.rotation.set(p.hipsPitch, p.hipsYaw, p.hipsRoll);
-    j.waist.rotation.set(p.waistPitch, p.waistYaw, p.waistRoll);
-    j.neck.rotation.set(p.neckPitch, p.neckYaw, p.neckRoll);
+    // 慣性: 加速・減速で体が前後に傾き、曲がるときは内側へ傾く（モーションの上に重ねる）
+    const L = this.lean;
+    const B = this.bank;
+    j.hips.rotation.set(p.hipsPitch + L * 0.45, p.hipsYaw, p.hipsRoll + B * 0.5);
+    j.waist.rotation.set(p.waistPitch + L * 0.55, p.waistYaw, p.waistRoll + B * 0.5);
+    j.neck.rotation.set(p.neckPitch - L * 0.5, p.neckYaw, p.neckRoll - B * 0.6); // 頭は水平を保とうとする
 
     // side: 左 = +1, 右 = -1
     this.applyLimbs(p, 'l', 1, j.lShoulder, j.lElbow, j.lHip, j.lKnee, j.lAnkle);
@@ -116,7 +136,7 @@ export class Animator {
     hip.rotation.set(-p[k + 'HipSwing'], side * p[k + 'HipTwist'], side * p[k + 'HipOut']);
     knee.rotation.x = p[k + 'Knee'];
     // 足首: 接地中(Flat=1)はスネの傾きを打ち消して靴底を水平に保つ
-    const shinPitch = p.hipsPitch - p[k + 'HipSwing'] + p[k + 'Knee'];
+    const shinPitch = p.hipsPitch + this.lean * 0.45 - p[k + 'HipSwing'] + p[k + 'Knee'];
     ankle.rotation.x = clamp(-shinPitch * p[k + 'Flat'] - p[k + 'Ankle'], -1.1, 1.1);
   }
 }

@@ -119,7 +119,12 @@ function toCameraSpace(character, [x, y, z]) {
 // 攻撃の節目ごとのカメラ演出
 function onAttackEvent(e) {
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type === 'finisherGrab') {
+  if (e.type === 'brake') {
+    // 急停止: 足元に土煙
+    v1.set(p1.group.position.x, 0.03, p1.group.position.z);
+    forward.set(Math.sin(p1.group.rotation.y), 0, Math.cos(p1.group.rotation.y));
+    sparks.burst(v1, forward, 7, p1.height * 0.06, p1.height * 1.5, 0.25, 0.2);
+  } else if (e.type === 'finisherGrab') {
     fx.zoom(60);
   } else if (e.type === 'finisherGrip') {
     // 胸ぐらを掴んだ瞬間: 一瞬止めて、ぐっと寄る
