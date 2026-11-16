@@ -1,6 +1,6 @@
 // スマホ横画面用の操作UI。
 //  - 左半分: 触れた場所に出るスティック。倒した量で歩く速さが変わり、外周まで倒し切ると走る
-//  - 右下  : 攻撃ボタン（押している間は連続斬り）。その左にジャンプ、真上にスキル1（どちらも一回り小さい）
+//  - 右下  : 攻撃ボタン（押している間は連続斬り）。その左にジャンプ、真上にスキル1、左斜め上にスキル2（いずれも一回り小さい）
 // 画面のそれ以外の場所（右上側）をドラッグするとカメラが回る（OrbitControls が担当）。
 
 const RUN_THRESHOLD = 0.92; // これ以上倒すと走る
@@ -47,26 +47,33 @@ const CSS = `
   display: grid; place-items: center; transition: transform 0.05s, box-shadow 0.05s; }
 #jump-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(5, 40, 110, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
 #jump-btn svg { width: 54%; height: 54%; }
-/* スキル1: 攻撃ボタンの真上に、ジャンプボタンと同じ大きさで */
-#skill-btn { position: absolute; width: var(--btn2); height: var(--btn2);
-  right: calc(28px + env(safe-area-inset-right) + (var(--btn) - var(--btn2)) / 2);
-  bottom: calc(26px + env(safe-area-inset-bottom) + var(--btn) + 14px);
+/* スキルボタン: ジャンプボタンと同じ大きさ。攻撃ボタンのまわりに並べる */
+.skill-btn { position: absolute; width: var(--btn2); height: var(--btn2);
   border-radius: 50%; pointer-events: auto; touch-action: none; overflow: hidden;
-  background: radial-gradient(circle at 50% 35%, rgba(190, 120, 255, 0.95), rgba(110, 40, 200, 0.95));
   border: 4px solid rgba(255, 255, 255, 0.85); box-sizing: border-box;
-  box-shadow: 0 4px 0 rgba(50, 10, 100, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3);
   display: grid; place-items: center; transition: transform 0.05s, box-shadow 0.05s, filter 0.15s; }
-#skill-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(50, 10, 100, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
-#skill-btn svg { width: 60%; height: 60%; grid-area: 1 / 1; }
+.skill-btn.pressed { transform: translateY(3px) scale(0.94); }
+.skill-btn svg { width: 60%; height: 60%; grid-area: 1 / 1; }
+/* スキル1: 攻撃ボタンの真上 */
+#skill-btn { right: calc(28px + env(safe-area-inset-right) + (var(--btn) - var(--btn2)) / 2);
+  bottom: calc(26px + env(safe-area-inset-bottom) + var(--btn) + 14px);
+  background: radial-gradient(circle at 50% 35%, rgba(190, 120, 255, 0.95), rgba(110, 40, 200, 0.95));
+  box-shadow: 0 4px 0 rgba(50, 10, 100, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
+/* スキル2: 攻撃ボタンの左斜め上（中心から45度の方向） */
+#skill2-btn { --off: calc((var(--btn) / 2 + var(--btn2) / 2 + 27px) * 0.7071);
+  right: calc(28px + env(safe-area-inset-right) + (var(--btn) - var(--btn2)) / 2 + var(--off));
+  bottom: calc(26px + env(safe-area-inset-bottom) + (var(--btn) - var(--btn2)) / 2 + var(--off));
+  background: radial-gradient(circle at 50% 35%, rgba(255, 190, 90, 0.95), rgba(190, 95, 15, 0.95));
+  box-shadow: 0 4px 0 rgba(95, 45, 0, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
 /* 使用中・クールタイム中: 暗くなり、残り時間ぶんの扇形が覆う。残り秒数を表示 */
-#skill-btn.cooling, #skill-btn.busy { filter: saturate(0.35) brightness(0.8); }
-#skill-btn .cd-cover { grid-area: 1 / 1; width: 100%; height: 100%; border-radius: 50%;
+.skill-btn.cooling, .skill-btn.busy { filter: saturate(0.35) brightness(0.8); }
+.skill-btn .cd-cover { grid-area: 1 / 1; width: 100%; height: 100%; border-radius: 50%;
   background: conic-gradient(rgba(10, 10, 25, 0.72) calc(var(--cd, 0) * 360deg), transparent 0); }
-#skill-btn .cd-num { grid-area: 1 / 1; z-index: 1; color: #fff; font: 800 calc(var(--btn2) * 0.36)/1 system-ui, sans-serif;
+.skill-btn .cd-num { grid-area: 1 / 1; z-index: 1; color: #fff; font: 800 calc(var(--btn2) * 0.36)/1 system-ui, sans-serif;
   text-shadow: 0 2px 3px #000a; display: none; }
-#skill-btn.cooling .cd-num { display: block; }
-#skill-btn.cooling svg { opacity: 0.35; }
-#skill-btn.ready-pop { animation: skill-ready 0.35s ease-out; }
+.skill-btn.cooling .cd-num { display: block; }
+.skill-btn.cooling svg { opacity: 0.35; }
+.skill-btn.ready-pop { animation: skill-ready 0.35s ease-out; }
 @keyframes skill-ready { 0% { transform: scale(1.3); filter: brightness(1.8); } 100% { transform: scale(1); } }
 
 /* コンボ技を出せる間: 金色に変わって脈打つ「掴み」ボタンになる */
@@ -127,6 +134,17 @@ const SKILL_SVG = `
   </g>
 </svg>`;
 
+// スキル2のアイコン（地面に突き刺した剣と、広がるひび）
+const SKILL2_SVG = `
+<svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+  <polyline points="4,46 16,44 24,48 32,45" fill="none" stroke="#fff" stroke-width="4"/>
+  <polyline points="32,45 40,49 48,44 60,47" fill="none" stroke="#fff" stroke-width="4"/>
+  <polyline points="20,58 26,52 32,46 39,53 45,59" fill="none" stroke="#fff" stroke-width="4"/>
+  <polygon points="29.5,14 34.5,14 34.5,40 32,46 29.5,40" fill="#f2f5f8" stroke="#5a2a00" stroke-width="2"/>
+  <rect x="23" y="10" width="18" height="4.5" rx="1" fill="#ffe08a" stroke="#5a2a00" stroke-width="2"/>
+  <rect x="30" y="3" width="4" height="7" fill="#7a4a28" stroke="#5a2a00" stroke-width="2"/>
+</svg>`;
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -135,8 +153,6 @@ export class TouchControls {
     this.attack = false;
     this.jumpQueued = false; // ジャンプが押された（読み取られるまで保持）
     this.special = false;
-    this.skillQueued = false; // スキル1が押された（読み取られるまで保持）
-    this.cooling = false;
     this.enabled = false;
 
     const style = document.createElement('style');
@@ -149,7 +165,8 @@ export class TouchControls {
     this.root.innerHTML = `
       <div id="stick-zone"><div id="stick-base"><span id="run-label">RUN</span><div id="stick-knob"></div></div></div>
       <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}${GRAB_SVG}</div>
-      <div id="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
+      <div id="skill-btn" class="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
+      <div id="skill2-btn" class="skill-btn" role="button" aria-label="スキル2">${SKILL2_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
       <div id="attack-btn" role="button" aria-label="攻撃">${SWORD_SVG}</div>`;
     document.body.appendChild(this.root);
 
@@ -163,15 +180,17 @@ export class TouchControls {
     this.knob = this.root.querySelector('#stick-knob');
     this.btn = this.root.querySelector('#attack-btn');
     this.jumpBtn = this.root.querySelector('#jump-btn');
-    this.skillBtn = this.root.querySelector('#skill-btn');
-    this.cdNum = this.skillBtn.querySelector('.cd-num');
+    this.skills = ['#skill-btn', '#skill2-btn'].map((sel) => {
+      const btn = this.root.querySelector(sel);
+      return { btn, num: btn.querySelector('.cd-num'), queued: false, cooling: false };
+    });
 
     this.resize();
     addEventListener('resize', () => this.resize());
     this.bindStick();
     this.bindButton();
     this.bindJump();
-    this.bindSkill();
+    this.bindSkills();
 
     // タッチ操作の端末なら表示。PC でも画面に触れたら表示に切り替える
     if (matchMedia('(pointer: coarse)').matches) this.enable();
@@ -271,44 +290,48 @@ export class TouchControls {
     this.base.classList.toggle('run', this.run);
   }
 
-  takeSkill() {
-    const k = this.skillQueued;
-    this.skillQueued = false;
+  // スキル i（0 = スキル1, 1 = スキル2）が押されていたら true を返し、押された記録を消す
+  takeSkill(i = 0) {
+    const k = this.skills[i].queued;
+    this.skills[i].queued = false;
     return k;
   }
 
-  bindSkill() {
-    this.skillBtn.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      this.skillBtn.setPointerCapture(e.pointerId);
-      this.skillQueued = true;
-      this.skillBtn.classList.add('pressed');
-      navigator.vibrate?.(8);
-    });
-    const end = () => this.skillBtn.classList.remove('pressed');
-    this.skillBtn.addEventListener('pointerup', end);
-    this.skillBtn.addEventListener('pointercancel', end);
-    this.skillBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+  bindSkills() {
+    for (const sk of this.skills) {
+      sk.btn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        sk.btn.setPointerCapture(e.pointerId);
+        sk.queued = true;
+        sk.btn.classList.add('pressed');
+        navigator.vibrate?.(8);
+      });
+      const end = () => sk.btn.classList.remove('pressed');
+      sk.btn.addEventListener('pointerup', end);
+      sk.btn.addEventListener('pointercancel', end);
+      sk.btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
   }
 
-  // スキル1の状態を表示。ratio: 残りクールタイムの割合（0〜1）、seconds: 残り秒数、busy: 使用中
-  setSkillCooldown(ratio, seconds, busy) {
+  // スキル i の状態を表示。ratio: 残りクールタイムの割合（0〜1）、seconds: 残り秒数、busy: 使用中
+  setSkillCooldown(i, ratio, seconds, busy) {
+    const sk = this.skills[i];
     const cooling = ratio > 0;
-    this.skillBtn.style.setProperty('--cd', busy ? 1 : ratio.toFixed(3));
-    this.skillBtn.classList.toggle('busy', busy);
-    if (cooling !== this.cooling) {
-      this.skillBtn.classList.toggle('cooling', cooling);
+    sk.btn.style.setProperty('--cd', busy ? 1 : ratio.toFixed(3));
+    sk.btn.classList.toggle('busy', busy);
+    if (cooling !== sk.cooling) {
+      sk.btn.classList.toggle('cooling', cooling);
       if (!cooling) { // 使えるようになった瞬間に光らせる
-        this.skillBtn.classList.remove('ready-pop');
-        void this.skillBtn.offsetWidth;
-        this.skillBtn.classList.add('ready-pop');
+        sk.btn.classList.remove('ready-pop');
+        void sk.btn.offsetWidth;
+        sk.btn.classList.add('ready-pop');
         navigator.vibrate?.(12);
       }
-      this.cooling = cooling;
+      sk.cooling = cooling;
     }
     if (cooling) {
       const n = Math.ceil(seconds);
-      if (this.cdNum.textContent !== String(n)) this.cdNum.textContent = n;
+      if (sk.num.textContent !== String(n)) sk.num.textContent = n;
     }
   }
 

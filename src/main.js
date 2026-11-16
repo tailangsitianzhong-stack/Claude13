@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
-import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1 } from './character/Controller.js';
+import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2 } from './character/Controller.js';
 import { input } from './input.js';
 import { TouchControls } from './ui/TouchControls.js';
 import { CameraFx } from './camera/CameraFx.js';
@@ -9,6 +9,7 @@ import { ThirdPersonCamera } from './camera/ThirdPersonCamera.js';
 import { Sparks } from './effects/Sparks.js';
 import { Impact } from './effects/Impact.js';
 import { GroundBreak } from './effects/GroundBreak.js';
+import { GroundCracks } from './effects/GroundCracks.js';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -66,6 +67,7 @@ const controls = { target: new THREE.Vector3() };
 const sparks = new Sparks(scene);
 const impact = new Impact(scene);
 const groundBreak = new GroundBreak(scene, stage.config.colors);
+const groundCracks = new GroundCracks(scene);
 let hitStop = 0;   // ヒットストップの残り秒数（命中の瞬間、時間をほぼ止める）
 let flash = 0;     // P2 を白く光らせる残り秒数
 
@@ -93,7 +95,8 @@ function readCommand() {
     run: input.isDown('ShiftLeft', 'ShiftRight') || touch.run,
     jump: input.wasPressed('Space') || touch.takeJump(),
     attack: input.isDown('KeyJ', 'Mouse0') || touch.attack,
-    skill: input.wasPressed('KeyK', 'KeyE') || touch.takeSkill(),
+    skill: input.wasPressed('KeyK', 'KeyE') || touch.takeSkill(0),
+    skill2: input.wasPressed('KeyL', 'KeyQ') || touch.takeSkill(1),
     toggleStance: input.wasPressed('KeyF'),
   };
 }
@@ -120,7 +123,9 @@ function toCameraSpace(character, [x, y, z]) {
 // 攻撃の節目ごとのカメラ演出
 function onAttackEvent(e) {
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type.startsWith('skill')) {
+  if (e.type.startsWith('skill2')) {
+    onSkill2Event(e);
+  } else if (e.type.startsWith('skill')) {
     onSkillEvent(e);
   } else if (e.type === 'brake') {
     // 急停止: 足元に土煙
@@ -245,6 +250,93 @@ function onSkillEvent(e) {
     sparks.burst(chest, forward, 24, p2.height * 0.07, p2.height * 4.2);
     sparks.burst(chest, forward, 12, p2.height * 0.06, p2.height * 3.0, 0.53, 0.9);
   }
+}
+
+// スキル2の節目ごとの演出
+function onSkill2Event(e) {
+  const k = player.s2;
+  const radius = SKILL2.radius * p1.scale;
+  if (e.type === 'skill2Start') {
+    fx.zoom(50);
+    fx.kick(0, 0.5, 0);
+  } else if (e.type === 'skill2Stab') {
+    // 突き刺した瞬間: ひびが走り始める
+    groundCracks.start(k.x, k.z, radius);
+    v1.set(k.x, 0.03, k.z);
+    fx.shake(0.45);
+    fx.kick(0, -0.9, 0);
+    fx.zoom(-70);
+    impact.ring(v1, p1.height * 1.4, 0.3);
+    impact.flash(v1.setY(p1.height * 0.15), p1.height * 1.5, 0.14);
+    forward.set(0, 0, 0);
+    sparks.burst(v1, forward, 8, p1.height * 0.045, p1.height * 1.1, 0.07, 0.45);
+  } else if (e.type === 'skill2Burst') {
+    skill2Burst(k.x, k.z, radius);
+  } else if (e.type === 'skill2Cancel') {
+    groundCracks.cancel();
+  }
+}
+
+const nearCamera = (pos) => Math.hypot(pos.x - camera.position.x, pos.z - camera.position.z) < p1.height * 1.6;
+
+// 力を込めている間: ひびが広がり、地面が揺れ、光の粒が立ちのぼる
+let chargeSpark = 0;
+function updateSkill2Charge(dt) {
+  const k = player.s2;
+  if (!k || k.phase !== 'charge') return;
+  const c = k.charge;
+  groundCracks.setCharge(c, clock.elapsedTime);
+  fx.trauma = Math.max(fx.trauma, 0.14 + 0.3 * c); // だんだん強くなる地鳴り
+  chargeSpark -= dt;
+  if (chargeSpark <= 0) {
+    chargeSpark = 0.07 - 0.04 * c;
+    // ひびの伸びた範囲のどこかから、光の粒と土くれが浮き上がる
+    const a = Math.random() * Math.PI * 2;
+    const r = SKILL2.radius * p1.scale * (0.1 + 0.85 * c * Math.random());
+    v1.set(k.x + Math.cos(a) * r, 0.03, k.z + Math.sin(a) * r);
+    if (nearCamera(v1)) return; // カメラの目の前には出さない（大きく映り込むため）
+    forward.set(0, 0, 0);
+    sparks.burst(v1, forward, 2, p1.height * 0.045, p1.height * 1.5, 0.53, 0.9);
+    if (Math.random() < 0.5) sparks.burst(v1, forward, 1, p1.height * 0.07, p1.height * 1.2, 0.07, 0.45);
+  }
+}
+
+// 解放: 地割れが噴き上がり、範囲内の相手を外へ吹き飛ばす
+function skill2Burst(cx, cz, radius) {
+  groundCracks.burst(p1.height);
+  groundBreak.trigger(cx, cz, radius * 0.42);
+  v1.set(cx, 0.03, cz);
+  impact.ring(v1, radius, 0.6);
+  impact.ring(v1, radius * 0.7, 0.45);
+  impact.ring(v1, radius * 0.4, 0.3);
+  impact.flash(v1.setY(p1.height * 0.4), p1.height * 4.5, 0.25);
+  // 範囲のあちこちで土くれと光の粒が跳ね上がる
+  for (let i = 0; i < 7; i++) {
+    const a = (i / 7) * Math.PI * 2 + Math.random();
+    const r = radius * (0.25 + Math.random() * 0.6);
+    v1.set(cx + Math.cos(a) * r, 0.03, cz + Math.sin(a) * r);
+    if (nearCamera(v1)) continue;
+    forward.set(Math.cos(a) * 0.5, 0, Math.sin(a) * 0.5);
+    sparks.burst(v1, forward, 5, p1.height * 0.085, p1.height * 3.0, 0.07, 0.45);
+    sparks.burst(v1, forward, 3, p1.height * 0.055, p1.height * 3.6, 0.53, 0.9);
+  }
+  fx.shake(1);
+  fx.kick(0, 1.2, 0.8);
+  fx.zoom(140);
+
+  // 範囲内の相手に命中（中心から外へ、一番強く吹き飛ばす）
+  const dx = p2.group.position.x - cx;
+  const dz = p2.group.position.z - cz;
+  const dist = Math.hypot(dx, dz);
+  const hittable = dummy.state === 'ground' || dummy.state === 'hit' || dummy.state === 'down';
+  if (dist > radius || !hittable) return;
+  dummy.hit(dist > 1e-4 ? dx : Math.sin(p1.group.rotation.y), dist > 1e-4 ? dz : Math.cos(p1.group.rotation.y), 3);
+  hitStop = 0.16;
+  flash = 0.14;
+  v1.set(p2.group.position.x, p2.height * 0.55, p2.group.position.z);
+  forward.set(dx, 0, dz).normalize();
+  sparks.burst(v1, forward, 16, p2.height * 0.065, p2.height * 3.4);
+  impact.flash(v1, p2.height * 2.4, 0.2);
 }
 
 // 引き寄せ中の光の綱（かざした手 → 刺さった剣）
@@ -400,7 +492,8 @@ function step(realDt) {
   // コンボ技を出せる間、ジャンプボタン（と PC の案内）を切り替える
   const canFinish = player.finisherWindow > 0 && player.canGrab();
   touch.setSpecial(canFinish);
-  touch.setSkillCooldown(player.skillCooldown / SKILL1.cooldown, player.skillCooldown, player.state === 'skill');
+  touch.setSkillCooldown(0, player.skillCooldown / SKILL1.cooldown, player.skillCooldown, player.state === 'skill');
+  touch.setSkillCooldown(1, player.skill2Cooldown / SKILL2.cooldown, player.skill2Cooldown, player.state === 'skill2');
   comboPrompt.classList.toggle('show', canFinish);
 
   for (const e of player.events) onAttackEvent(e);
@@ -437,6 +530,8 @@ function step(realDt) {
   sparks.update(dt);
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
   groundBreak.update(realDt);
+  groundCracks.update(realDt);
+  updateSkill2Charge(realDt);
   updateTether(clock.elapsedTime);
   flash = Math.max(0, flash - realDt);
   p2.setFlash(flash > 0 ? 1 : 0);
@@ -452,7 +547,9 @@ function step(realDt) {
     // スキル1: 投げて引き寄せるまでは少し引き、連打からは近くで見せる
     const skillPhase = player.sk ? player.sk.phase : null;
     const skillZoom = !skillPhase ? 1 : (skillPhase === 'flurry' || skillPhase === 'pullOut' || skillPhase === 'kick') ? 1.1 : 1.5;
-    view.zoomTarget = cinematic ? 2.3 : skillZoom;
+    // スキル2: 力を込める間はじわっと寄り、解放で大きく引いて範囲全体を見せる
+    const s2Zoom = !player.s2 ? 1 : player.s2.phase === 'charge' || player.s2.phase === 'stab' ? 0.85 : 2.0;
+    view.zoomTarget = cinematic ? 2.3 : player.s2 ? s2Zoom : skillZoom;
     view.heightFollow = cinematic ? 0.5 : 0.4;
     // スキル1で相手を捉えている間は、2人の中間を映す（投げた先の相手が画面から出ないように）
     let focus = p1.group.position;

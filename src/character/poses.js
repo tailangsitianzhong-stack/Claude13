@@ -908,7 +908,81 @@ function pummeled(ctx, o) {
   }
 }
 
+// ============================================================
+// スキル2（地面に剣を突き刺し、力を込めて地割れを起こす）のポーズ
+// ============================================================
+// 片膝をついて、両手で地面に刺した剣の柄を握る（共通の土台）
+function kneelOnSword(o) {
+  o.hipsPitch = 0.15; o.waistPitch = 0.45; o.neckPitch = 0.25;
+  o.lHipSwing = 1.2; o.lKnee = 1.1; o.lHipOut = 0.14; o.lFlat = 1;       // 左膝を立てる
+  o.rHipSwing = -0.1; o.rKnee = 1.55; o.rHipOut = 0.12; o.rAnkle = -0.3; // 右膝は地面へ
+  o.rShoulderSwing = 1.65; o.rShoulderOut = -0.12; o.rShoulderTwist = 0.3; o.rElbow = 0.3;
+  o.lShoulderSwing = 1.6; o.lShoulderOut = -0.3; o.lShoulderTwist = 0.6; o.lElbow = 0.45;
+  o.swordTilt = 2.92; // 刃が真下を向く
+}
+
+// 逆手に持ち替えながら頭上へ振り上げ（〜0.62）、片膝をついて一気に突き立てる（1）
+const GROUND_STAB = [
+  { t: 0, pose: (o) => {
+    o.waistPitch = 0.05; o.neckPitch = -0.1;
+    o.lHipSwing = 0.2; o.lKnee = 0.3; o.lHipOut = 0.12; o.lFlat = 1;
+    o.rHipSwing = -0.1; o.rKnee = 0.3; o.rHipOut = 0.12; o.rFlat = 1;
+    o.rShoulderSwing = 1.4; o.rShoulderOut = 0.2; o.rElbow = 0.9; o.swordTilt = 2.6;
+    o.lShoulderSwing = 1.2; o.lShoulderOut = 0.0; o.lShoulderTwist = 0.5; o.lElbow = 1.0;
+  } },
+  { t: 0.62, ease: 'out', pose: (o) => { // 伸び上がって、切っ先を真下に構える
+    o.waistPitch = -0.22; o.hipsPitch = -0.04; o.neckPitch = 0.3; o.lift = 0.25;
+    o.lHipSwing = 0.15; o.lKnee = 0.15; o.lHipOut = 0.12; o.lAnkle = -0.5;
+    o.rHipSwing = -0.05; o.rKnee = 0.15; o.rHipOut = 0.12; o.rAnkle = -0.5;
+    o.rShoulderSwing = 2.75; o.rShoulderOut = 0.05; o.rShoulderTwist = 0.3; o.rElbow = 0.75; o.swordTilt = 5.33;
+    o.lShoulderSwing = 2.7; o.lShoulderOut = -0.2; o.lShoulderTwist = 0.6; o.lElbow = 0.85;
+  } },
+  { t: 1, ease: 'in', pose: kneelOnSword },
+];
+const groundStab = (ctx, o) => keyed(ctx.attackT, GROUND_STAB, o);
+
+// 力を込める: attackT（0〜1）が進むほど深く沈み、全身が小刻みに震える。解放の瞬間（jolt）に体が跳ね上がる
+function stabCharge(ctx, o) {
+  kneelOnSword(o);
+  const c = ctx.attackT;
+  const j = ctx.jolt;
+  const tremble = sin(ctx.time * 61) * (0.012 + 0.03 * c);
+  const tremble2 = sin(ctx.time * 47 + 1.3) * (0.01 + 0.025 * c);
+  o.waistPitch += 0.14 * c + tremble - 0.4 * j;
+  o.hipsPitch += 0.05 * c - 0.1 * j;
+  o.neckPitch += 0.2 * c + tremble2 - 0.75 * j;   // うつむいて力をため、解放で顔を上げる
+  o.waistRoll = tremble2;
+  o.lKnee += 0.12 * c; o.lHipSwing += 0.1 * c;
+  o.rShoulderSwing += 0.14 * c + tremble + 0.25 * j;
+  o.lShoulderSwing += 0.14 * c - tremble + 0.25 * j;
+  o.rElbow += 0.25 * c - 0.2 * j;                 // 肘を張って押し込む
+  o.lElbow += 0.25 * c - 0.2 * j;
+  o.rShoulderOut += 0.12 * c; o.lShoulderOut += 0.1 * c;
+  o.swordTilt += 0.25 * c + tremble * 0.6 + 0.05 * j;
+}
+
+// 引き抜いて立ち上がる: 柄を引き上げ（〜0.55）、剣を払って構え直す（1）
+const STAB_PULL = [
+  { t: 0, pose: kneelOnSword },
+  { t: 0.55, ease: 'inout', pose: (o) => {
+    o.waistPitch = 0.1; o.hipsPitch = 0.02; o.neckPitch = -0.1;
+    o.lHipSwing = 0.6; o.lKnee = 0.75; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.25; o.rKnee = 0.6; o.rHipOut = 0.14; o.rFlat = 0.7;
+    o.rShoulderSwing = 2.1; o.rShoulderOut = 0.1; o.rShoulderTwist = 0.3; o.rElbow = 0.9; o.swordTilt = 3.2;
+    o.lShoulderSwing = 1.9; o.lShoulderOut = -0.2; o.lShoulderTwist = 0.6; o.lElbow = 1.0;
+  } },
+  { t: 1, ease: 'inout', pose: (o) => {
+    o.hipsYaw = -0.2; o.waistYaw = -0.3; o.neckYaw = 0.45; o.waistPitch = 0.05;
+    o.lHipSwing = 0.3; o.lKnee = 0.35; o.lHipOut = 0.12; o.lFlat = 1;
+    o.rHipSwing = -0.15; o.rKnee = 0.35; o.rHipOut = 0.14; o.rFlat = 1;
+    o.rShoulderSwing = 0.5; o.rShoulderOut = 0.55; o.rElbow = 0.5; o.swordTilt = 1.2; o.swordTwist = -0.3;
+    o.lShoulderSwing = 0.3; o.lShoulderOut = 0.3; o.lElbow = 0.6;
+  } },
+];
+const stabPull = (ctx, o) => keyed(ctx.attackT, STAB_PULL, o);
+
 export const POSES = {
+  groundStab, stabCharge, stabPull,
   spinUp, throwSword, beckon, flurry, pullOut, kick, impaled, dragged, pummeled,
   stand, fight, walk, run, crouch, air, land, attack1, attack2, attack3, airSlam, hit,
   grab, liftCrouch, carry, throw: throwDown, struggle, thrown, down, brake,

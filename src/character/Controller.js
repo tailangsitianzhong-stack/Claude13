@@ -61,9 +61,9 @@ export const FINISHER = {
 export const SKILL1 = {
   cooldown: 6,       // 次に使えるまでの秒数（終わってから数える）
   range: 45,         // この距離以内の相手を狙う（リグ単位）。いなければ前方へ投げて剣が戻ってくる
-  spin: 0.6,         // 剣を振り回す時間（秒）
-  throwTime: 0.36,   // 投げる動きの長さ
-  release: 0.18,     // そのうち、手を離す瞬間
+  spin: 0.3,         // 剣を振り回す時間（秒）
+  throwTime: 0.28,   // 投げる動きの長さ
+  release: 0.13,     // そのうち、手を離す瞬間
   flight: 0.26,      // 剣が相手に届くまでの時間
   stuck: 0.4,        // 刺さって相手がよろめく間
   pull: 0.7,         // 手をかざして引き寄せる時間
@@ -75,6 +75,16 @@ export const SKILL1 = {
   kickHit: 0.42,     // そのうち、足が当たる瞬間（0〜1）
   missDist: 16,      // 相手がいないとき、剣が飛ぶ距離
   embed: 1.7,        // 刺さった剣の柄が、相手の胸からどれだけ手前にあるか
+};
+// スキル2: 剣を地面に突き刺して力を込め、地割れを起こして周囲を広く攻撃する
+export const SKILL2 = {
+  cooldown: 8,       // 次に使えるまでの秒数（終わってから数える）
+  stab: 0.42,        // 振り上げて突き刺すまでの時間（秒）
+  charge: 0.95,      // 力を込める時間。この間にひびが広がる
+  hold: 0.4,         // 解放したあと、そのままの姿勢でいる時間
+  pull: 0.5,         // 剣を引き抜いて立ち上がる時間
+  radius: 24,        // 攻撃範囲の半径（リグ単位。叩きつけの約1.7倍）
+  reach: 2.0,        // 範囲の中心はキャラの前方これだけ先（剣を刺した位置）
 };
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
 
@@ -118,6 +128,8 @@ export class CharacterController {
     this.skillCooldown = 0;   // スキル1を次に使えるまでの残り秒数
     this.sk = null;           // スキル1の進行状況
     this.tether = null;       // 引き寄せ中の光の綱 { from, to }（描画用）
+    this.skill2Cooldown = 0;  // スキル2を次に使えるまでの残り秒数
+    this.s2 = null;           // スキル2の進行状況 { phase, t, charge, x, z }
 
     this.target = null;       // 攻撃時に自動で向く相手（Character）
     this.attackIndex = 0;     // 今出している攻撃の番号
@@ -180,6 +192,70 @@ export class CharacterController {
   }
 
   // ============================================================
+  // スキル2: 剣を地面に突き刺す → 力を込める → 地割れで周囲を攻撃 → 引き抜く
+  // ============================================================
+  startSkill2() {
+    const { group, animator, scale: S } = this.c;
+    const h = group.rotation.y;
+    this.s2 = {
+      phase: 'stab', t: 0, charge: 0,
+      x: group.position.x + Math.sin(h) * SKILL2.reach * S, // 剣を刺す位置 = 地割れの中心
+      z: group.position.z + Math.cos(h) * SKILL2.reach * S,
+    };
+    this.state = 'skill2';
+    this.vx = this.vz = this.vy = 0;
+    this.attackActive = false;
+    animator.trailOn = false;
+    animator.leanTarget = animator.bankTarget = 0;
+    animator.attackT = 0;
+    animator.jolt = 0;
+    animator.play('groundStab', 0.1);
+    this.events.push({ type: 'skill2Start' });
+  }
+
+  updateSkill2(dt) {
+    const { animator } = this.c;
+    const K = SKILL2;
+    const k = this.s2;
+    k.t += dt;
+    if (k.phase === 'stab') {
+      animator.attackT = Math.min(1, k.t / K.stab);
+      animator.trailOn = animator.attackT > 0.6; // 突き下ろす間だけ軌跡
+      if (k.t >= K.stab) {
+        k.phase = 'charge';
+        k.t = 0;
+        animator.trailOn = false;
+        animator.attackT = 0;
+        animator.play('stabCharge', 0.08);
+        this.events.push({ type: 'skill2Stab' });
+      }
+    } else if (k.phase === 'charge') {
+      k.charge = Math.min(1, k.t / K.charge);
+      animator.attackT = k.charge;
+      if (k.t >= K.charge) {
+        k.phase = 'hold';
+        k.t = 0;
+        animator.jolt = 1;
+        this.events.push({ type: 'skill2Burst' });
+      }
+    } else if (k.phase === 'hold') {
+      if (k.t >= K.hold) {
+        k.phase = 'pull';
+        k.t = 0;
+        animator.attackT = 0;
+        animator.play('stabPull', 0.12);
+      }
+    } else if (k.phase === 'pull') {
+      animator.attackT = Math.min(1, k.t / K.pull);
+      if (k.t >= K.pull) {
+        this.s2 = null;
+        this.state = 'ground';
+        this.skill2Cooldown = K.cooldown;
+      }
+    }
+  }
+
+  // ============================================================
   // スキル1: 剣投げ → 引き寄せ → 連打 → 引き抜き → 蹴り
   // ============================================================
   startSkill() {
@@ -202,7 +278,7 @@ export class CharacterController {
     animator.trailOn = false;
     animator.leanTarget = animator.bankTarget = 0;
     animator.spin = 0;
-    animator.play('spinUp', 0.16);
+    animator.play('spinUp', 0.1);
     this.events.push({ type: 'skillStart' });
   }
 
@@ -305,8 +381,8 @@ export class CharacterController {
       case 'spin': {
         // 剣を頭上で振り回す。だんだん速く
         const f = Math.min(1, k.t / K.spin);
-        animator.spin += (9 + 34 * f) * dt;
-        animator.trailOn = f > 0.15;
+        animator.spin += (22 + 26 * f) * dt;
+        animator.trailOn = f > 0.1;
         if (f >= 1) {
           k.phase = 'throw';
           k.t = 0;
@@ -607,6 +683,7 @@ export class CharacterController {
     this.vz = (dz / len) * speed;
     this.vy = 0;
     group.position.y = 0;
+    if (this.s2) { this.s2 = null; this.skill2Cooldown = SKILL2.cooldown; this.events.push({ type: 'skill2Cancel' }); }
     this.state = 'hit';
     this.hitDuration = power > 2 ? 0.9 : power > 1 ? 0.6 : 0.4;
     this.attackActive = false;
@@ -644,6 +721,11 @@ export class CharacterController {
     this.skillCooldown = Math.max(0, this.skillCooldown - dt);
     if (this.state === 'skill') {
       this.updateSkill(dt);
+      return;
+    }
+    this.skill2Cooldown = Math.max(0, this.skill2Cooldown - dt);
+    if (this.state === 'skill2') {
+      this.updateSkill2(dt);
       return;
     }
     // コンボ技: 3段目を当てた直後にジャンプを押すと、相手を掴み上げる
@@ -756,6 +838,8 @@ export class CharacterController {
           animator.play('crouch', 0.07);
         } else if (cmd.skill && this.c.sword && this.skillCooldown <= 0) {
           this.startSkill();
+        } else if (cmd.skill2 && this.c.sword && this.skill2Cooldown <= 0) {
+          this.startSkill2();
         } else if (cmd.attack && this.c.sword) {
           this.startAttack(0, cmd);
         } else if (!moving && speed > 0.4 && (animator.name === 'run' || animator.name === 'brake')) {
@@ -768,7 +852,7 @@ export class CharacterController {
         } else {
           // 立ちへ戻る。攻撃・着地・急停止のあとは、ゆっくり構え直して少し揺り戻す
           const from = animator.name;
-          const recover = from.startsWith('attack') || from === 'land' || from === 'brake' || from === 'hit' || from === 'kick' || from === 'throwSword';
+          const recover = from.startsWith('attack') || from === 'land' || from === 'brake' || from === 'hit' || from === 'kick' || from === 'throwSword' || from === 'stabPull';
           animator.play(this.idle, recover ? 0.38 : 0.22, recover);
         }
         break;
