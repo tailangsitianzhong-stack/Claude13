@@ -59,6 +59,19 @@ const CSS = `
   bottom: calc(26px + env(safe-area-inset-bottom) + var(--btn) + 14px);
   background: radial-gradient(circle at 50% 35%, rgba(190, 120, 255, 0.95), rgba(110, 40, 200, 0.95));
   box-shadow: 0 4px 0 rgba(50, 10, 100, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
+/* スキル1を使ったあと: 同じボタンがスキル3（ため斬り）に変わる。水色になり、押している間は金色の輪でため具合を示す */
+#skill-btn .icon-s3 { display: none; }
+#skill-btn.mode3 { background: radial-gradient(circle at 50% 35%, rgba(120, 235, 255, 0.97), rgba(10, 130, 200, 0.97));
+  box-shadow: 0 4px 0 rgba(0, 60, 110, 0.6), 0 0 0 4px rgba(120, 230, 255, 0.4), 0 0 18px 5px rgba(90, 220, 255, 0.7); }
+#skill-btn.mode3 .icon-s1 { display: none; }
+#skill-btn.mode3 .icon-s3 { display: block; }
+.skill-btn .charge-ring { grid-area: 1 / 1; width: 100%; height: 100%; border-radius: 50%; display: none;
+  background: conic-gradient(#ffd54a calc(var(--charge, 0) * 360deg), rgba(0, 0, 0, 0.35) 0);
+  -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%); mask: radial-gradient(circle, transparent 56%, #000 58%); }
+.skill-btn.charging .charge-ring { display: block; }
+.skill-btn.charging { transform: scale(1.06); }
+.skill-btn.charged { animation: grab-pulse 0.18s ease-in-out infinite alternate; }
+
 /* スキル2: 攻撃ボタンの左斜め上（中心から45度の方向） */
 #skill2-btn { --off: calc((var(--btn) / 2 + var(--btn2) / 2 + 27px) * 0.7071);
   right: calc(28px + env(safe-area-inset-right) + (var(--btn) - var(--btn2)) / 2 + var(--off));
@@ -122,7 +135,7 @@ const GRAB_SVG = `
 
 // スキル1のアイコン（回転する剣）
 const SKILL_SVG = `
-<svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+<svg class="icon-s1" viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
   <path d="M10 30 A22 22 0 0 1 50 18" fill="none" stroke="#fff" stroke-width="5"/>
   <polygon points="52,8 55,23 41,19" fill="#fff"/>
   <path d="M54 34 A22 22 0 0 1 14 46" fill="none" stroke="#fff" stroke-width="5"/>
@@ -132,6 +145,14 @@ const SKILL_SVG = `
     <rect x="24" y="40" width="16" height="4" rx="1" fill="#e8c14a" stroke="#3a0f6e" stroke-width="2"/>
     <rect x="30" y="44" width="4" height="7" fill="#7a4a28" stroke="#3a0f6e" stroke-width="2"/>
   </g>
+</svg>`;
+
+// スキル3のアイコン（3つ並んで飛ぶ三日月の斬撃）
+const SKILL3_SVG = `
+<svg class="icon-s3" viewBox="0 0 64 64" aria-hidden="true" stroke-linejoin="round">
+  <path d="M10 8 Q34 32 10 56 Q22 32 10 8 Z" fill="#fff" stroke="#00406b" stroke-width="2.5"/>
+  <path d="M26 8 Q50 32 26 56 Q38 32 26 8 Z" fill="#fff" stroke="#00406b" stroke-width="2.5"/>
+  <path d="M42 8 Q66 32 42 56 Q54 32 42 8 Z" fill="#fff" stroke="#00406b" stroke-width="2.5"/>
 </svg>`;
 
 // スキル2のアイコン（地面に突き刺した剣と、広がるひび）
@@ -165,7 +186,7 @@ export class TouchControls {
     this.root.innerHTML = `
       <div id="stick-zone"><div id="stick-base"><span id="run-label">RUN</span><div id="stick-knob"></div></div></div>
       <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}${GRAB_SVG}</div>
-      <div id="skill-btn" class="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
+      <div id="skill-btn" class="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}${SKILL3_SVG}<div class="cd-cover"></div><div class="charge-ring"></div><span class="cd-num"></span></div>
       <div id="skill2-btn" class="skill-btn" role="button" aria-label="スキル2">${SKILL2_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
       <div id="attack-btn" role="button" aria-label="攻撃">${SWORD_SVG}</div>`;
     document.body.appendChild(this.root);
@@ -182,7 +203,7 @@ export class TouchControls {
     this.jumpBtn = this.root.querySelector('#jump-btn');
     this.skills = ['#skill-btn', '#skill2-btn'].map((sel) => {
       const btn = this.root.querySelector(sel);
-      return { btn, num: btn.querySelector('.cd-num'), queued: false, cooling: false };
+      return { btn, num: btn.querySelector('.cd-num'), queued: false, cooling: false, held: false, mode: 'skill1', charge: 0 };
     });
 
     this.resize();
@@ -297,16 +318,48 @@ export class TouchControls {
     return k;
   }
 
+  // スキル i のボタンを押し続けているか（ため用）
+  skillHeld(i = 0) {
+    return this.skills[i].held;
+  }
+
+  // スキル i のボタンの見た目を切り替える（'skill1' | 'skill3'）
+  setSkillMode(i, mode) {
+    const sk = this.skills[i];
+    if (sk.mode === mode) return;
+    sk.mode = mode;
+    sk.btn.classList.toggle('mode3', mode === 'skill3');
+    sk.btn.setAttribute('aria-label', mode === 'skill3' ? 'スキル3' : 'スキル1');
+    if (mode === 'skill3') { // 変わった瞬間に光らせる
+      sk.btn.classList.remove('ready-pop');
+      void sk.btn.offsetWidth;
+      sk.btn.classList.add('ready-pop');
+      navigator.vibrate?.(12);
+    }
+  }
+
+  // ため具合（0〜1）を金色の輪で表示。0 で消える
+  setSkillCharge(i, charge) {
+    const sk = this.skills[i];
+    if (charge === sk.charge) return;
+    if (charge >= 1 && sk.charge < 1) navigator.vibrate?.(30);
+    sk.charge = charge;
+    sk.btn.style.setProperty('--charge', charge.toFixed(3));
+    sk.btn.classList.toggle('charging', charge > 0);
+    sk.btn.classList.toggle('charged', charge >= 1);
+  }
+
   bindSkills() {
     for (const sk of this.skills) {
       sk.btn.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         sk.btn.setPointerCapture(e.pointerId);
         sk.queued = true;
+        sk.held = true;
         sk.btn.classList.add('pressed');
         navigator.vibrate?.(8);
       });
-      const end = () => sk.btn.classList.remove('pressed');
+      const end = () => { sk.held = false; sk.btn.classList.remove('pressed'); };
       sk.btn.addEventListener('pointerup', end);
       sk.btn.addEventListener('pointercancel', end);
       sk.btn.addEventListener('contextmenu', (e) => e.preventDefault());

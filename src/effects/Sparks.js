@@ -37,7 +37,8 @@ export class Sparks {
     }
   }
 
-  update(dt) {
+  // camera を渡すと、カメラのすぐ近くの粒は描かない（画面いっぱいに映り込むのを防ぐ）
+  update(dt, camera = null, minDist = 0) {
     for (const it of this.items) {
       if (it.life <= 0) continue;
       it.life -= dt;
@@ -45,6 +46,7 @@ export class Sparks {
       it.vel.y -= GRAVITY * dt * it.size * 12;
       it.mesh.position.addScaledVector(it.vel, dt);
       it.mesh.scale.setScalar(it.size * (it.life / it.max));
+      if (camera) it.mesh.visible = it.mesh.position.distanceToSquared(camera.position) > minDist * minDist;
     }
   }
 }

@@ -76,7 +76,7 @@ export class Impact {
     })));
     make('streak', 4, () => new THREE.Mesh(new THREE.PlaneGeometry(1, 1), glow(0xcff4ff)));
     make('ring', 3, () => new THREE.Mesh(new THREE.RingGeometry(0.78, 1, 40).rotateX(-Math.PI / 2), glow(0x9fe6ff)));
-    make('wave', 4, () => new THREE.Mesh(crescentGeometry(2.3, 1, 0.34), glow(0x6fdcff)));
+    make('wave', 12, () => new THREE.Mesh(crescentGeometry(2.3, 1, 0.34), glow(0x6fdcff)));
   }
 
   take(kind) {

@@ -1,17 +1,20 @@
 import * as THREE from 'three';
 import { RIG } from './rig.js';
+import { STAB_IMPACT } from './poses.js';
 
 // 速さ・ジャンプの設定（単位は「リグ単位」= キャラの縮尺を掛ける前。身長が約5）
 export const MOVE = {
-  walkSpeed: 4.6,     // 毎秒
-  runSpeed: 12,
-  accel: 45,          // 加速
-  decel: 60,          // 減速
-  brakeDecel: 30,     // 走りから止まるときの減速（少し滑って止まる）
+  walkSpeed: 9.2,     // 毎秒
+  runSpeed: 24,
+  accel: 90,          // 加速
+  decel: 120,         // 減速
+  brakeDecel: 60,     // 走りから止まるときの減速（少し滑って止まる）
   airControl: 0.35,   // 空中での加減速の効き
   turnRate: 14,       // 向きを変える速さ
-  walkStride: 3.9,    // 歩き1周期（2歩）で進む距離 → 足が滑って見えないよう位相を距離に同期
-  runStride: 9.0,
+  // 歩き・走り1周期（2歩）で進む距離。足の運びを移動距離に合わせる。
+  // 速さを上げた分は歩幅を広げて、足の回転が速くなりすぎないようにしている
+  walkStride: 5.9,
+  runStride: 13.5,
   jumpHeight: 4.2,     // 身長の約0.85倍
   gravity: 62,
   crouchTime: 0.09,   // 踏み切り前のため
@@ -79,14 +82,31 @@ export const SKILL1 = {
 // スキル2: 剣を地面に突き刺して力を込め、地割れを起こして周囲を広く攻撃する
 export const SKILL2 = {
   cooldown: 8,       // 次に使えるまでの秒数（終わってから数える）
-  stab: 0.42,        // 振り上げて突き刺すまでの時間（秒）
-  charge: 0.95,      // 力を込める時間。この間にひびが広がる
+  stab: 0.5,         // 跳び上がって突き刺し、押し込むまでの動きの長さ（秒）。刺さるのはその74%の時点
+  charge: 0.4,       // 押し込んでから地割れが噴き上がるまでの時間
   hold: 0.4,         // 解放したあと、そのままの姿勢でいる時間
   pull: 0.5,         // 剣を引き抜いて立ち上がる時間
   radius: 24,        // 攻撃範囲の半径（リグ単位。叩きつけの約1.7倍）
   reach: 2.0,        // 範囲の中心はキャラの前方これだけ先（剣を刺した位置）
 };
+// スキル3（ため斬り）: スキル1を使ったあと、同じボタンがこれに変わる。
+// ボタンを押している間ためて、離すと飛ぶ斬撃を1つ。最後までためると自動で3つ放つ
+export const SKILL3 = {
+  maxCharge: 5,      // 最大までためるのにかかる秒数
+  shotTime: 0.28,    // 斬撃1つを放つ動きの長さ（秒）
+  speed: 62,         // 斬撃の飛ぶ速さ（リグ単位/秒）
+  range: 46,         // 飛ぶ距離
+  radius: 3.4,       // 当たり判定の半径（ためるほど大きくなる）
+  aimRange: 50,      // この距離以内の相手へ向き直る
+};
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
+
+// スキル3で斬撃を放つときに使う振り。from〜to: 攻撃モーションのどこからどこまでを使うか、fire: 斬撃が飛び出す瞬間
+const SHOTS = [
+  { anim: 'attack1', from: 0.3, to: 0.8, fire: 0.5, time: 1 },    // 袈裟斬り
+  { anim: 'attack2', from: 0.28, to: 0.8, fire: 0.5, time: 1 },   // 横薙ぎ
+  { anim: 'attack3', from: 0.3, to: 0.85, fire: 0.58, time: 1.5 }, // 跳んで振り下ろす
+];
 
 const TWO_PI = Math.PI * 2;
 const _a = new THREE.Vector3();
@@ -129,6 +149,8 @@ export class CharacterController {
     this.sk = null;           // スキル1の進行状況
     this.tether = null;       // 引き寄せ中の光の綱 { from, to }（描画用）
     this.skill2Cooldown = 0;  // スキル2を次に使えるまでの残り秒数
+    this.skill3Ready = false; // スキル1のボタンがスキル3に変わっているか（スキル1を使うと true）
+    this.s3 = null;           // スキル3の進行状況 { phase, t, charge, count, shot }
     this.s2 = null;           // スキル2の進行状況 { phase, t, charge, x, z }
 
     this.target = null;       // 攻撃時に自動で向く相手（Character）
@@ -192,6 +214,78 @@ export class CharacterController {
   }
 
   // ============================================================
+  // スキル3: ため斬り（押している間ためる → 離すと斬撃1つ / 最大までためると3つ）
+  // ============================================================
+  startSkill3() {
+    const { animator } = this.c;
+    this.s3 = { phase: 'charge', t: 0, charge: 0, count: 0, shot: 0, fired: false, full: false };
+    this.state = 'skill3';
+    this.vx = this.vz = this.vy = 0;
+    this.attackActive = false;
+    animator.trailOn = false;
+    animator.leanTarget = animator.bankTarget = 0;
+    animator.attackT = 0;
+    animator.play('chargeStance', 0.16);
+    this.events.push({ type: 'skill3Start' });
+  }
+
+  updateSkill3(dt, cmd) {
+    const { group, animator, scale: S } = this.c;
+    const K = SKILL3;
+    const k = this.s3;
+    k.t += dt;
+
+    // 向き: 近くに相手がいればそちらへ。いなければ入力した方向へ向き直れる
+    let aim = Math.hypot(cmd.x, cmd.z) > 0.01 ? Math.atan2(cmd.x, cmd.z) : group.rotation.y;
+    if (this.target) {
+      const dx = this.target.group.position.x - group.position.x;
+      const dz = this.target.group.position.z - group.position.z;
+      if (Math.hypot(dx, dz) < K.aimRange * S) aim = Math.atan2(dx, dz);
+    }
+    group.rotation.y += angleDiff(aim, group.rotation.y) * (1 - Math.exp(-10 * dt));
+
+    if (k.phase === 'charge') {
+      k.charge = Math.min(1, k.t / K.maxCharge);
+      animator.attackT = k.charge;
+      if (k.charge >= 1 && !k.full) { k.full = true; this.events.push({ type: 'skill3Full' }); }
+      if (!cmd.skillHold || k.charge >= 1) {
+        // 離した（または最大までたまった）: 斬撃を放つ
+        k.phase = 'release';
+        k.count = k.charge >= 1 ? 3 : 1;
+        k.shot = 0;
+        k.t = 0;
+        k.fired = false;
+        this.skill3Ready = false; // ボタンはスキル1に戻る
+        animator.attackT = SHOTS[0].from;
+        animator.play(SHOTS[0].anim, 0.07);
+      }
+    } else {
+      // 斬撃を放つ動き: 通常攻撃の振りを、振りかぶりを省いて素早く使う
+      const sh = SHOTS[k.shot];
+      const f = Math.min(1, k.t / (K.shotTime * sh.time));
+      animator.attackT = sh.from + (sh.to - sh.from) * f;
+      animator.trailOn = animator.attackT < sh.fire + 0.15;
+      if (!k.fired && animator.attackT >= sh.fire) {
+        k.fired = true;
+        this.events.push({ type: 'skill3Shot', index: k.shot, count: k.count, charge: k.charge, last: k.shot === k.count - 1 });
+      }
+      if (f >= 1) {
+        animator.trailOn = false;
+        if (k.shot < k.count - 1) {
+          k.shot++;
+          k.t = 0;
+          k.fired = false;
+          animator.attackT = SHOTS[k.shot].from;
+          animator.play(SHOTS[k.shot].anim, 0.07);
+        } else {
+          this.s3 = null;
+          this.state = 'ground';
+        }
+      }
+    }
+  }
+
+  // ============================================================
   // スキル2: 剣を地面に突き刺す → 力を込める → 地割れで周囲を攻撃 → 引き抜く
   // ============================================================
   startSkill2() {
@@ -220,17 +314,22 @@ export class CharacterController {
     k.t += dt;
     if (k.phase === 'stab') {
       animator.attackT = Math.min(1, k.t / K.stab);
-      animator.trailOn = animator.attackT > 0.6; // 突き下ろす間だけ軌跡
+      animator.trailOn = animator.attackT > 0.55 && animator.attackT < STAB_IMPACT; // 突き下ろす間だけ軌跡
+      if (!k.stabbed && animator.attackT >= STAB_IMPACT) {
+        k.stabbed = true; // 刺さった瞬間。ここからひびが走り始める
+        this.events.push({ type: 'skill2Stab' });
+      }
+      if (k.stabbed) k.charge = Math.min(1, (k.t - K.stab * STAB_IMPACT) / (K.stab * (1 - STAB_IMPACT) + K.charge));
       if (k.t >= K.stab) {
         k.phase = 'charge';
         k.t = 0;
         animator.trailOn = false;
-        animator.attackT = 0;
+        animator.attackT = k.charge;
         animator.play('stabCharge', 0.08);
-        this.events.push({ type: 'skill2Stab' });
       }
     } else if (k.phase === 'charge') {
-      k.charge = Math.min(1, k.t / K.charge);
+      const pushIn = K.stab * (1 - STAB_IMPACT); // 押し込んでいる間から、ひびは伸び始めている
+      k.charge = Math.min(1, (k.t + pushIn) / (K.charge + pushIn));
       animator.attackT = k.charge;
       if (k.t >= K.charge) {
         k.phase = 'hold';
@@ -315,6 +414,7 @@ export class CharacterController {
     this.sk = null;
     this.state = 'ground';
     this.skillCooldown = SKILL1.cooldown;
+    this.skill3Ready = true; // スキル1を使ったので、ボタンがスキル3に変わる
     const v = this.victim;
     if (v && v.state === 'held') { v.state = 'ground'; v.c.group.position.y = 0; }
   }
@@ -683,6 +783,7 @@ export class CharacterController {
     this.vz = (dz / len) * speed;
     this.vy = 0;
     group.position.y = 0;
+    if (this.s3) { this.s3 = null; this.skill3Ready = false; }
     if (this.s2) { this.s2 = null; this.skill2Cooldown = SKILL2.cooldown; this.events.push({ type: 'skill2Cancel' }); }
     this.state = 'hit';
     this.hitDuration = power > 2 ? 0.9 : power > 1 ? 0.6 : 0.4;
@@ -726,6 +827,10 @@ export class CharacterController {
     this.skill2Cooldown = Math.max(0, this.skill2Cooldown - dt);
     if (this.state === 'skill2') {
       this.updateSkill2(dt);
+      return;
+    }
+    if (this.state === 'skill3') {
+      this.updateSkill3(dt, cmd);
       return;
     }
     // コンボ技: 3段目を当てた直後にジャンプを押すと、相手を掴み上げる
@@ -836,6 +941,8 @@ export class CharacterController {
           this.state = 'crouch';
           this.timer = MOVE.crouchTime;
           animator.play('crouch', 0.07);
+        } else if (cmd.skill && this.c.sword && this.skill3Ready) {
+          this.startSkill3();
         } else if (cmd.skill && this.c.sword && this.skillCooldown <= 0) {
           this.startSkill();
         } else if (cmd.skill2 && this.c.sword && this.skill2Cooldown <= 0) {

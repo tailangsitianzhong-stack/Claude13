@@ -921,24 +921,43 @@ function kneelOnSword(o) {
   o.swordTilt = 2.92; // 刃が真下を向く
 }
 
-// 逆手に持ち替えながら頭上へ振り上げ（〜0.62）、片膝をついて一気に突き立てる（1）
+// 地面へ突き刺す。4つの段階をはっきり分ける:
+//   〜0.42 逆手に持ち替えながら跳び上がり、切っ先を真下にして両手で頭上に掲げる
+//   〜0.55 頂点で一瞬ためる（体を反らせて狙いを定める）
+//   〜0.74 全体重を乗せて落ち、片膝をつきながら突き立てる（ここで地面に刺さる）
+//   〜1    刺さった剣を、肩を入れてさらに深く押し込む
 const GROUND_STAB = [
   { t: 0, pose: (o) => {
-    o.waistPitch = 0.05; o.neckPitch = -0.1;
-    o.lHipSwing = 0.2; o.lKnee = 0.3; o.lHipOut = 0.12; o.lFlat = 1;
-    o.rHipSwing = -0.1; o.rKnee = 0.3; o.rHipOut = 0.12; o.rFlat = 1;
+    o.waistPitch = 0.12; o.neckPitch = -0.1;
+    o.lHipSwing = 0.45; o.lKnee = 0.75; o.lHipOut = 0.12; o.lFlat = 1; // 踏み切りの沈み込み
+    o.rHipSwing = 0.3; o.rKnee = 0.75; o.rHipOut = 0.12; o.rFlat = 1;
     o.rShoulderSwing = 1.4; o.rShoulderOut = 0.2; o.rElbow = 0.9; o.swordTilt = 2.6;
     o.lShoulderSwing = 1.2; o.lShoulderOut = 0.0; o.lShoulderTwist = 0.5; o.lElbow = 1.0;
   } },
-  { t: 0.62, ease: 'out', pose: (o) => { // 伸び上がって、切っ先を真下に構える
-    o.waistPitch = -0.22; o.hipsPitch = -0.04; o.neckPitch = 0.3; o.lift = 0.25;
-    o.lHipSwing = 0.15; o.lKnee = 0.15; o.lHipOut = 0.12; o.lAnkle = -0.5;
-    o.rHipSwing = -0.05; o.rKnee = 0.15; o.rHipOut = 0.12; o.rAnkle = -0.5;
-    o.rShoulderSwing = 2.75; o.rShoulderOut = 0.05; o.rShoulderTwist = 0.3; o.rElbow = 0.75; o.swordTilt = 5.33;
-    o.lShoulderSwing = 2.7; o.lShoulderOut = -0.2; o.lShoulderTwist = 0.6; o.lElbow = 0.85;
+  { t: 0.42, ease: 'out', pose: (o) => { // 跳び上がって掲げる
+    o.waistPitch = -0.25; o.hipsPitch = -0.05; o.neckPitch = 0.3; o.lift = 1.0;
+    o.lHipSwing = 0.75; o.lKnee = 1.35; o.lHipOut = 0.1; o.lAnkle = -0.4;
+    o.rHipSwing = 0.1; o.rKnee = 1.2; o.rHipOut = 0.1; o.rAnkle = -0.4;
+    o.rShoulderSwing = 2.8; o.rShoulderOut = 0.05; o.rShoulderTwist = 0.3; o.rElbow = 0.75; o.swordTilt = 5.37;
+    o.lShoulderSwing = 2.75; o.lShoulderOut = -0.2; o.lShoulderTwist = 0.6; o.lElbow = 0.85;
   } },
-  { t: 1, ease: 'in', pose: kneelOnSword },
+  { t: 0.55, ease: 'out', pose: (o) => { // 頂点のため: さらに反って、肘を引き上げる
+    o.waistPitch = -0.38; o.hipsPitch = -0.08; o.neckPitch = 0.42; o.lift = 1.15;
+    o.lHipSwing = 0.85; o.lKnee = 1.5; o.lHipOut = 0.1; o.lAnkle = -0.4;
+    o.rHipSwing = 0.0; o.rKnee = 1.35; o.rHipOut = 0.1; o.rAnkle = -0.4;
+    o.rShoulderSwing = 2.95; o.rShoulderOut = 0.05; o.rShoulderTwist = 0.3; o.rElbow = 1.0; o.swordTilt = 5.9;
+    o.lShoulderSwing = 2.9; o.lShoulderOut = -0.2; o.lShoulderTwist = 0.6; o.lElbow = 1.1;
+  } },
+  { t: 0.74, ease: 'in', pose: (o) => { // 突き立てた瞬間: 片膝が地面に着き、腕はまだ高い（刃が半分ほど入る）
+    o.hipsPitch = 0.12; o.waistPitch = 0.32; o.neckPitch = 0.3;
+    o.lHipSwing = 1.15; o.lKnee = 1.05; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.1; o.rKnee = 1.5; o.rHipOut = 0.12; o.rAnkle = -0.3;
+    o.rShoulderSwing = 2.0; o.rShoulderOut = -0.1; o.rShoulderTwist = 0.3; o.rElbow = 0.55; o.swordTilt = 3.68;
+    o.lShoulderSwing = 1.95; o.lShoulderOut = -0.3; o.lShoulderTwist = 0.6; o.lElbow = 0.7;
+  } },
+  { t: 1, ease: 'out', pose: kneelOnSword }, // 体重をかけて、鍔の近くまで押し込む
 ];
+export const STAB_IMPACT = 0.74; // 剣が地面に刺さる瞬間（groundStab の進み具合）
 const groundStab = (ctx, o) => keyed(ctx.attackT, GROUND_STAB, o);
 
 // 力を込める: attackT（0〜1）が進むほど深く沈み、全身が小刻みに震える。解放の瞬間（jolt）に体が跳ね上がる
@@ -981,7 +1000,27 @@ const STAB_PULL = [
 ];
 const stabPull = (ctx, o) => keyed(ctx.attackT, STAB_PULL, o);
 
+// ============================================================
+// スキル3（ため斬り）: 剣を右脇に引いて構え、力をためる。attackT = ため具合（0〜1）
+// ============================================================
+function chargeStance(ctx, o) {
+  const c = ctx.attackT;
+  const tr = sin(ctx.time * 53) * (0.008 + 0.028 * c);
+  const tr2 = sin(ctx.time * 41 + 2) * (0.008 + 0.022 * c);
+  const breathe = sin(ctx.time * 3.2) * 0.02 * (1 - c);
+  o.hipsYaw = -0.4; o.waistYaw = -0.55 - 0.2 * c; o.neckYaw = 0.9 + 0.2 * c; // 右へ深くひねってためる
+  o.waistPitch = 0.18 + 0.12 * c + tr + breathe; o.hipsPitch = 0.04 + 0.04 * c; o.neckPitch = -0.12;
+  o.waistRoll = -0.06 + tr2;
+  o.lHipSwing = 0.5 + 0.12 * c; o.lKnee = 0.6 + 0.3 * c; o.lHipOut = 0.16; o.lFlat = 1;
+  o.rHipSwing = -0.38; o.rKnee = 0.6 + 0.3 * c; o.rHipOut = 0.18; o.rFlat = 0.75;
+  // 剣は右腰の後ろへ引き、切っ先を後ろ下へ。左手を柄に添える
+  o.rShoulderSwing = -0.35 - 0.15 * c + tr; o.rShoulderOut = 0.35; o.rElbow = 0.75 + 0.2 * c;
+  o.swordTilt = 2.0 + 0.2 * c + tr2 * 2; o.swordTwist = -0.3;
+  o.lShoulderSwing = 0.55; o.lShoulderOut = -0.75; o.lShoulderTwist = 0.6; o.lElbow = 1.45 + 0.15 * c - tr;
+}
+
 export const POSES = {
+  chargeStance,
   groundStab, stabCharge, stabPull,
   spinUp, throwSword, beckon, flurry, pullOut, kick, impaled, dragged, pummeled,
   stand, fight, walk, run, crouch, air, land, attack1, attack2, attack3, airSlam, hit,
