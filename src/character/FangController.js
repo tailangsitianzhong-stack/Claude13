@@ -108,6 +108,14 @@ export class FangController extends CharacterController {
 
   get claws() { return this.c.claws; }
 
+  // ロード中に、あとで使うものを全部作っておく（分身・巨大蝙蝠・足の蝙蝠・宝石）。試合中に作ると、重くなる
+  preload() {
+    this.ensureClones();
+    this.ensureBigBat();
+    this.ensureGem();
+    if (!this.legBats) { this.legBats = new LegBats(); this.legBats.attach(this.c.joints.hips); }
+  }
+
   update(dt, cmd) {
     this.timeNow += dt;
     // スキル中: 共通の移動処理は使わず、専用の進行だけ動かす

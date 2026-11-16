@@ -91,13 +91,11 @@ export function createGem() {
   const m = new THREE.Mesh(new THREE.OctahedronGeometry(1, 0).scale(0.7, 1, 0.7), new THREE.MeshStandardMaterial({ color: 0xc8001e, roughness: 0.2, metalness: 0.2, emissive: 0xff0a28, emissiveIntensity: 0.9, flatShading: true }));
   m.castShadow = true;
   g.add(m);
-  const light = new THREE.PointLight(0xff1030, 0, 7, 1.6);
-  g.add(light);
   g.userData.setGlow = (k, time = 0) => {
     m.material.emissiveIntensity = 0.7 + 2.6 * k * (0.75 + 0.25 * Math.sin(time * 24));
-    light.intensity = 9 * k;
     m.scale.setScalar(1 + 0.25 * k);
   };
+  // 【メモ】ここに PointLight は置かない。光源の数が変わると、画面のすべての物のシェーダーが作り直されて、一瞬止まるため
   g.userData.setGlow(0);
   return g;
 }

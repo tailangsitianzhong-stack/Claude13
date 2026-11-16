@@ -867,12 +867,82 @@ const weaponSelect = new WeaponSelect((id) => {
   document.body.classList.remove('pre-match');
   fightHud.showBanner('READY', 'FIGHT!');
   window.game.weapon = weapon;
-});
+}, { hold: true }); // スタート画面とロードのあとに出す
 // 試合前は、HP・ボタンなどの表示を隠す
 document.body.classList.add('pre-match');
 
+// ---- スタート画面とロード ----
+// index.html の #boot（JS より先に出る）。「スタート」を押すと、ロード（すべての技の準備）が走り、終わると武器選択が出る。
+// ロード: 後から作ると重くなるものを先に作り、すべての見た目（ステージ・ムービーの舞台・エフェクト）を一度描いて、
+// シェーダーのコンパイルと、画像・形の転送を済ませておく。試合中に、初めての技を出しても止まらないようにするため。
+const bootEl = document.getElementById('boot');
+const startBtn = document.getElementById('start-btn');
+const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+function setLoad(p, msg) {
+  const pct = Math.round(Math.min(1, Math.max(0, p)) * 100);
+  document.getElementById('load-bar').style.width = pct + '%';
+  document.getElementById('load-pct').textContent = pct + '%';
+  if (msg) document.getElementById('load-msg').textContent = msg;
+}
+// root の舞台（null = 試合のステージ）を表示した状態で、すべてのものを（画面の外のものも）一度描く
+function warmRender(root) {
+  const cine = [batUlt.center.group, fangUlt.castle.group, arrowUlt.yard.group];
+  const saved = [];
+  // 光源は、そのまま（光源の数が変わると、シェーダーが別物になる。試合中と同じ数で作る）
+  scene.traverse((o) => { saved.push([o, o.visible, o.frustumCulled]); if (!o.isLight) o.visible = true; o.frustumCulled = false; });
+  for (const g of cine) g.visible = g === root;
+  stage.group.visible = root === null;
+  renderer.render(scene, camera);
+  renderer.render(scene, camera);
+  for (const [o, vis, cul] of saved) { o.visible = vis; o.frustumCulled = cul; }
+}
+async function loadAll() {
+  setLoad(0.02, 'キャラクターを準備しています');
+  await nextFrame();
+  fangPlayer.preload();                       // 分身・巨大蝙蝠・足の蝙蝠・赤い宝石
+  setLoad(0.18, 'エフェクトを準備しています');
+  await nextFrame();
+  const places = [['試合のステージ', null], ['バッティングセンター', batUlt.center.group], ['ドラキュラ城', fangUlt.castle.group], ['ゴミ処理場', arrowUlt.yard.group]];
+  for (let i = 0; i < places.length; i++) {
+    setLoad(0.25 + (0.7 * i) / places.length, places[i][0] + 'を読み込んでいます');
+    await nextFrame();
+    warmRender(places[i][1]);
+    await nextFrame();
+  }
+  setLoad(1, '準備ができました');
+  await nextFrame();
+}
+let booted = false;
+function finishBoot() {
+  if (booted) return;
+  booted = true;
+  bootEl.classList.add('out');
+  setTimeout(() => bootEl.remove(), 600);
+  weaponSelect.show();
+}
+// 確認用: ロードを飛ばして、すぐ武器選択（game.start から）
+function skipBoot() {
+  if (booted) return;
+  booted = true;
+  bootEl.remove();
+  weaponSelect.show();
+}
+let bootStarted = false;
+async function onBootStart() {
+  if (bootStarted || booted) return;
+  bootStarted = true;
+  bootEl.classList.add('loading');
+  try { await loadAll(); } catch (err) { console.error(err); }
+  finishBoot();
+}
+startBtn.disabled = false;
+startBtn.textContent = 'START';
+startBtn.addEventListener('click', onBootStart);
+bootEl.addEventListener('click', () => { if (!startBtn.disabled) onBootStart(); });
+if (/[?&]skipboot\b/.test(location.search)) skipBoot();
+
 // デバッグ用
-window.game = { start: (id) => { if (id) weaponSelect.select(id); weaponSelect.confirm(); }, isStarted: () => started, weapon, ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
+window.game = { start: (id) => { skipBoot(); if (id) weaponSelect.select(id); weaponSelect.confirm(); }, isStarted: () => started, weapon, ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -1026,7 +1096,7 @@ function step(realDt) {
   if (!window.game.skipRender) renderer.render(scene, camera); // skipRender: 確認用の早送り
   fx.restore();
 }
-window.game.arrow = arrowDirector; window.game.fang = fangDirector; window.game.swarm = batSwarm;
+window.game.renderer = renderer; window.game.arrow = arrowDirector; window.game.fang = fangDirector; window.game.swarm = batSwarm;
 window.game.step = step; // manual=true のとき、外からコマ送りできる（動作確認用）
 
 const clock = new THREE.Clock();

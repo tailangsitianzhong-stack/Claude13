@@ -83,8 +83,14 @@ export class ArrowDirector {
       this.foeStickers[name] = st;
     }
     // 砲弾（立体の矢印）と、鈍足矢印の弾
+    // ロード中に作っておく（試合中に作ると、重くなる）: 砲弾2つ、鈍足矢印の弾1つ
     this.cannonHeld = null;
     this.cannons = [];
+    this.cannonPool = [];
+    for (let i = 0; i < 3; i++) { const c = createCannon(); c.visible = false; scene.add(c); this.cannonPool.push(c); }
+    this.slowArrow = createArrow3D(ARROW_COLORS.slow, { depth: 0.2, scale: 0.2 });
+    this.slowArrow.visible = false;
+    scene.add(this.slowArrow);
     this.slowShot = null;
     // 地面から立つ上向き矢印（コンボ）
     this.upArrow = createArrow3D(ARROW_COLORS.up, { depth: 0.14, scale: 0.0, pointing: 'y' });
@@ -93,7 +99,7 @@ export class ArrowDirector {
     this.upT = 0;
     // 隆起する地面の柱（プール）
     this.pillars = [];
-    const pm = new THREE.MeshStandardMaterial({ color: 0x7a6a52, roughness: 1, flatShading: true });
+    const pm = new THREE.MeshStandardMaterial({ color: 0x7a6a52, roughness: 1 }); // 平らな面の指定（flatShading）をしない: 他の物と同じシェーダーを使えて、初めて出るときに止まらない
     for (let i = 0; i < 9; i++) { const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), pm); m.visible = false; m.castShadow = true; scene.add(m); this.pillars.push({ m, t: 9, h: 1, w: 1, delay: 0 }); }
     this.rush = null;        // 加速ダッシュ中の軌跡
   }
@@ -170,9 +176,11 @@ export class ArrowDirector {
       // ---- スキル1: 砲弾 ----
       case 'arrowSkill1Start': fx.zoom(-40); break;
       case 'arrowCannonStick': {
-        const m = createCannon();
+        const m = this.cannonPool.find((c) => !c.visible) ?? createCannon();
+        if (!m.parent) scene.add(m);
+        m.visible = true;
+        m.userData.flame.visible = false;
         m.scale.setScalar(0.001);
-        scene.add(m);
         this.cannonHeld = { m, t: 0 };
         p1.joints.rWrist.getWorldPosition(v);
         impact.flash(v, p1.height * 1.3, 0.2);
@@ -232,9 +240,9 @@ export class ArrowDirector {
       case 'arrowSkill4Start': fx.zoom(-40); break;
       case 'arrowSlowShot': {
         p1.joints.rWrist.getWorldPosition(v);
-        const m = createArrow3D(ARROW_COLORS.slow, { depth: 0.2, scale: 0.2 });
+        const m = this.slowArrow;
+        m.visible = true;
         m.position.copy(v);
-        scene.add(m);
         const to = new THREE.Vector3(p2.group.position.x, p2.group.position.y + 3.0 * S, p2.group.position.z);
         this.slowShot = { m, from: v.clone(), to: e.hasTarget ? to : v.clone().addScaledVector(new THREE.Vector3(Math.sin(p1.group.rotation.y), 0, Math.cos(p1.group.rotation.y)), 8 * S), t: 0, dur: 0.22 };
         fx.zoom(60); fx.kick(0.3, 0, 0.5);
@@ -277,7 +285,7 @@ export class ArrowDirector {
         for (const s of p1.shinStickers) s.visible = false;
         this.foeStickers.down.visible = false;
         this.upArrow.visible = false;
-        if (this.cannonHeld) { scene.remove(this.cannonHeld.m); this.cannonHeld = null; }
+        if (this.cannonHeld) { this.cannonHeld.m.visible = false; this.cannonHeld = null; }
         this.rush = null;
         break;
       default: break;
@@ -414,13 +422,13 @@ export class ArrowDirector {
       const hittable = dummy.state === 'ground' || dummy.state === 'hit' || dummy.state === 'down';
       if (hittable && closest.distanceTo(foe) < 5.2 * S) {
         this.cannonHit(c, closest);
-        this.ctx.scene.remove(c.m);
+        c.m.visible = false;
         this.cannons.splice(i, 1);
       } else if (c.left <= 0 || Math.abs(c.p.x) > B.maxX + 4 || Math.abs(c.p.z) > B.maxZ + 4 || c.p.y < 0) {
         impact.flash(c.p, p1.height * 1.4, 0.18);
         impact.ring(w.set(c.p.x, 0, c.p.z), p1.height * 1.6, 0.3);
         sparks.burst(c.p, w.set(0, 0, 0), 12, p1.height * 0.05, p1.height * 2.4, HUE.cannon, 1, 0.55, 0.3);
-        this.ctx.scene.remove(c.m);
+        c.m.visible = false;
         this.cannons.splice(i, 1);
       }
     }
@@ -433,7 +441,7 @@ export class ArrowDirector {
       const d = w.subVectors(s.to, s.from);
       if (d.lengthSq() > 1e-8) { d.normalize(); s.m.rotation.set(-Math.asin(Math.max(-1, Math.min(1, d.y))), Math.atan2(d.x, d.z), 0, 'YXZ'); }
       s.m.userData.setGlow(1, time);
-      if (u >= 1) { this.ctx.scene.remove(s.m); this.slowShot = null; }
+      if (u >= 1) { s.m.visible = false; this.slowShot = null; }
     }
     // 地面から立つ上向き矢印: のびて、立つ
     if (this.upArrow.visible) {

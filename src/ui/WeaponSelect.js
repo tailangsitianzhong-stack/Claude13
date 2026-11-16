@@ -12,11 +12,16 @@ const CSS = `
 #weapon-select > :first-child { margin-top: auto; }
 #weapon-select > :last-child { margin-bottom: auto; }
 #weapon-select > * { flex-shrink: 0; }
+/* ページ全体は touch-action: none（拡大・スクロールの防止）。この画面だけは、上下のスライドを許す。
+   タップした場所（カードや文字）にも指定しないと、スライドが効かない（touch-action は、触った要素から親までのすべてで許されている必要がある） */
+#weapon-select, #weapon-select * { touch-action: pan-y; }
+#weapon-select.wait { display: none; }
 #weapon-select.out { opacity: 0; pointer-events: none; }
 #weapon-select h1 { margin: 0; font: 900 min(7vw, 36px)/1 system-ui, sans-serif; letter-spacing: 0.3em; text-shadow: 0 0 18px #4fd8ff, 0 3px 0 #04203d; }
 #weapon-select .sub { margin-top: -6px; font-size: 12px; letter-spacing: 0.3em; color: #9fd4ff; }
-#weapon-select .cards { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
-#weapon-select .card { box-sizing: border-box; width: min(calc((100vw - 110px) / 4), 210px); padding: 12px 12px 14px; border-radius: 14px; text-align: center; cursor: pointer; position: relative;
+#weapon-select .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; width: 100%; max-width: 920px; }
+@media (max-width: 560px) { #weapon-select .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+#weapon-select .card { box-sizing: border-box; min-width: 0; padding: 12px 12px 14px; border-radius: 14px; text-align: center; cursor: pointer; position: relative;
   background: linear-gradient(#1b3366, #0f1c40); border: 3px solid rgba(255,255,255,0.35); box-shadow: 0 6px 0 #040a1c, 0 8px 18px rgba(0,0,0,0.45);
   transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s; }
 #weapon-select .card.sel { border-color: #ffd54a; transform: translateY(-3px) scale(1.03); box-shadow: 0 6px 0 #040a1c, 0 0 0 4px rgba(255,213,74,0.35), 0 0 26px 6px rgba(255,200,60,0.55); }
@@ -74,7 +79,8 @@ const ICONS = { sword: SWORD_ICON, bat: BAT_ICON, fang: FANG_ICON, arrow: ARROW_
 const STAT_LABELS = { power: '攻撃力', speed: '速さ', reach: 'リーチ' };
 
 export class WeaponSelect {
-  constructor(onSelect) {
+  // hold: true なら、show() が呼ばれるまで表示しない（タイトル・ロードのあとに出す）
+  constructor(onSelect, { hold = false } = {}) {
     const style = document.createElement('style');
     style.textContent = CSS;
     document.head.appendChild(style);
@@ -82,6 +88,8 @@ export class WeaponSelect {
     this.selected = DEFAULT_WEAPON;
     this.root = document.createElement('div');
     this.root.id = 'weapon-select';
+    this.held = hold;
+    if (hold) this.root.classList.add('wait');
     this.root.innerHTML = `<h1>武器選択</h1><div class="sub">SELECT YOUR WEAPON</div><div class="cards"></div><button class="go" type="button">決 定</button><div class="note">Enter / Space でも決定できます</div>`;
     document.body.appendChild(this.root);
     const cards = this.root.querySelector('.cards');
@@ -96,9 +104,14 @@ export class WeaponSelect {
     }
     this.select(this.selected);
     this.root.querySelector('.go').addEventListener('click', () => this.confirm());
-    this.onKey = (e) => { if (e.code === 'Enter' || e.code === 'Space') { e.preventDefault(); this.confirm(); } };
+    this.onKey = (e) => { if (!this.held && (e.code === 'Enter' || e.code === 'Space')) { e.preventDefault(); this.confirm(); } };
     addEventListener('keydown', this.onKey);
     this.done = false;
+  }
+
+  show() {
+    this.held = false;
+    this.root.classList.remove('wait');
   }
 
   select(id) {
