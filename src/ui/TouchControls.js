@@ -1,6 +1,6 @@
 // スマホ横画面用の操作UI。
 //  - 左半分: 触れた場所に出るスティック。倒した量で歩く速さが変わり、外周まで倒し切ると走る
-//  - 右下  : 攻撃ボタン（押している間は連続斬り）。その左にジャンプ、真上にスキル1、左斜め上にスキル2（いずれも一回り小さい）
+//  - 右下  : 攻撃ボタン（押している間は連続斬り）。その左にジャンプ、真上にスキル1、左斜め上にスキル2、その左にスキル4（いずれも一回り小さい）
 // 画面のそれ以外の場所（右上側）をドラッグするとカメラが回る（OrbitControls が担当）。
 
 const RUN_THRESHOLD = 0.92; // これ以上倒すと走る
@@ -78,6 +78,11 @@ const CSS = `
   bottom: calc(26px + env(safe-area-inset-bottom) + (var(--btn) - var(--btn2)) / 2 + var(--off));
   background: radial-gradient(circle at 50% 35%, rgba(255, 190, 90, 0.95), rgba(190, 95, 15, 0.95));
   box-shadow: 0 4px 0 rgba(95, 45, 0, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
+/* スキル4: スキル2の左隣（同じ高さ） */
+#skill4-btn { right: calc(28px + env(safe-area-inset-right) + (var(--btn) - var(--btn2)) / 2 + (var(--btn) / 2 + var(--btn2) / 2 + 27px) * 0.7071 + var(--btn2) + 8px);
+  bottom: calc(26px + env(safe-area-inset-bottom) + (var(--btn) - var(--btn2)) / 2 + (var(--btn) / 2 + var(--btn2) / 2 + 27px) * 0.7071);
+  background: radial-gradient(circle at 50% 35%, rgba(255, 120, 150, 0.97), rgba(200, 20, 70, 0.97));
+  box-shadow: 0 4px 0 rgba(100, 0, 30, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
 /* 使用中・クールタイム中: 暗くなり、残り時間ぶんの扇形が覆う。残り秒数を表示 */
 .skill-btn.cooling, .skill-btn.busy { filter: saturate(0.35) brightness(0.8); }
 .skill-btn .cd-cover { grid-area: 1 / 1; width: 100%; height: 100%; border-radius: 50%;
@@ -155,6 +160,15 @@ const SKILL3_SVG = `
   <path d="M42 8 Q66 32 42 56 Q54 32 42 8 Z" fill="#fff" stroke="#00406b" stroke-width="2.5"/>
 </svg>`;
 
+// スキル4のアイコン（剣を前へ向けて突っ込む。後ろへ流れる速度線）
+const SKILL4_SVG = `
+<svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M4 22 H24 M2 32 H20 M4 42 H24" fill="none" stroke="#fff" stroke-width="4" opacity="0.9"/>
+  <polygon points="26,28 52,28 62,32 52,36 26,36" fill="#f2f5f8" stroke="#5a0a25" stroke-width="2.2"/>
+  <rect x="22" y="23" width="5" height="18" rx="1" fill="#ffe08a" stroke="#5a0a25" stroke-width="2"/>
+  <rect x="12" y="29.5" width="10" height="5" fill="#7a4a28" stroke="#5a0a25" stroke-width="2"/>
+</svg>`;
+
 // スキル2のアイコン（地面に突き刺した剣と、広がるひび）
 const SKILL2_SVG = `
 <svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
@@ -188,6 +202,7 @@ export class TouchControls {
       <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}${GRAB_SVG}</div>
       <div id="skill-btn" class="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}${SKILL3_SVG}<div class="cd-cover"></div><div class="charge-ring"></div><span class="cd-num"></span></div>
       <div id="skill2-btn" class="skill-btn" role="button" aria-label="スキル2">${SKILL2_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
+      <div id="skill4-btn" class="skill-btn" role="button" aria-label="スキル4">${SKILL4_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
       <div id="attack-btn" role="button" aria-label="攻撃">${SWORD_SVG}</div>`;
     document.body.appendChild(this.root);
 
@@ -201,7 +216,7 @@ export class TouchControls {
     this.knob = this.root.querySelector('#stick-knob');
     this.btn = this.root.querySelector('#attack-btn');
     this.jumpBtn = this.root.querySelector('#jump-btn');
-    this.skills = ['#skill-btn', '#skill2-btn'].map((sel) => {
+    this.skills = ['#skill-btn', '#skill2-btn', '#skill4-btn'].map((sel) => {
       const btn = this.root.querySelector(sel);
       return { btn, num: btn.querySelector('.cd-num'), queued: false, cooling: false, held: false, mode: 'skill1', charge: 0 };
     });

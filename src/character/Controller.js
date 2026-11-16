@@ -88,16 +88,33 @@ export const SKILL2 = {
   pull: 0.5,         // 剣を引き抜いて立ち上がる時間
   radius: 24,        // 攻撃範囲の半径（リグ単位。叩きつけの約1.7倍）
   reach: 2.0,        // 範囲の中心はキャラの前方これだけ先（剣を刺した位置）
+  stun: 4,           // 当てた相手に付ける気絶の秒数（吹き飛んでいる間も含む）
+};
+// スキル4: 剣を前へ向けて一瞬で飛びかかり、相手を遠くまで吹き飛ばす
+export const SKILL4 = {
+  cooldown: 7,       // 次に使えるまでの秒数（終わってから数える）
+  aim: 0.28,         // 剣を前へ向けて構え、ためる時間（秒）
+  dash: 0.09,        // 飛びかかる時間（ほぼ一瞬）
+  hold: 0.34,        // 突きの姿勢で止まる時間
+  recover: 0.4,      // 構え直す時間
+  range: 70,         // この距離以内の相手へ飛びかかる（リグ単位）
+  maxDash: 62,       // 一度に飛びかかれる最大距離
+  noTarget: 32,      // 相手がいないときに進む距離
+  stopShort: 3.4,    // 相手の手前これだけの位置で止まる
+  reach: 7,          // 飛びかかったあと、この距離以内に相手がいれば命中
+  launchSpeed: 82,   // 相手を吹き飛ばす水平の速さ（リグ単位/秒）。着地後に滑る分も合わせて約60離れる
+  launchUp: 17,      // 吹き飛ばすときの上向きの速さ
 };
 // スキル3（ため斬り）: スキル1を使ったあと、同じボタンがこれに変わる。
 // ボタンを押している間ためて、離すと飛ぶ斬撃を1つ。最後までためると自動で3つ放つ
 export const SKILL3 = {
-  maxCharge: 5,      // 最大までためるのにかかる秒数
+  maxCharge: 2,      // 最大までためるのにかかる秒数
   shotTime: 0.28,    // 斬撃1つを放つ動きの長さ（秒）
-  speed: 62,         // 斬撃の飛ぶ速さ（リグ単位/秒）
-  range: 46,         // 飛ぶ距離
-  radius: 3.4,       // 当たり判定の半径（ためるほど大きくなる）
-  aimRange: 50,      // この距離以内の相手へ向き直る
+  speed: 110,        // 斬撃の飛ぶ速さ（リグ単位/秒）
+  range: 138,        // 飛ぶ距離（初期の3倍）
+  radius: 10.2,      // 当たり判定の半径（初期の3倍。ためるほど大きくなる）
+  size: 3,           // 斬撃の見た目の大きさの倍率
+  aimRange: 140,     // この距離以内の相手へ向き直る
 };
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
 
@@ -109,6 +126,8 @@ const SHOTS = [
 ];
 
 const TWO_PI = Math.PI * 2;
+// 気絶中は何も入力できない
+const STUN_CMD = { x: 0, z: 0, run: false, jump: false, attack: false, skill: false, skillHold: false, skill2: false, skill4: false, toggleStance: false };
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
@@ -149,6 +168,9 @@ export class CharacterController {
     this.sk = null;           // スキル1の進行状況
     this.tether = null;       // 引き寄せ中の光の綱 { from, to }（描画用）
     this.skill2Cooldown = 0;  // スキル2を次に使えるまでの残り秒数
+    this.skill4Cooldown = 0;  // スキル4を次に使えるまでの残り秒数
+    this.s4 = null;           // スキル4の進行状況
+    this.status = character.status; // 状態異常（気絶など）
     this.skill3Ready = false; // スキル1のボタンがスキル3に変わっているか（スキル1を使うと true）
     this.s3 = null;           // スキル3の進行状況 { phase, t, charge, count, shot }
     this.s2 = null;           // スキル2の進行状況 { phase, t, charge, x, z }
@@ -211,6 +233,177 @@ export class CharacterController {
     animator.attackT = 0;
     animator.play('airSlam', 0.06);
     this.events.push({ type: 'airSlamStart', index: 2 });
+  }
+
+  // ============================================================
+  // 吹き飛ばし（遠くまで飛んで、倒れて滑る）
+  // ============================================================
+  // 闘技場の壁に当たったら位置を戻して速度を消す。当たったら true
+  slamIntoWall() {
+    if (!this.bounds) return false;
+    const { group, scale: S } = this.c;
+    const r = 0.5 * S * RIG.chest[0];
+    const b = this.bounds;
+    const cx = Math.min(b.maxX - r, Math.max(b.minX + r, group.position.x));
+    const cz = Math.min(b.maxZ - r, Math.max(b.minZ + r, group.position.z));
+    const hit = cx !== group.position.x || cz !== group.position.z;
+    if (hit) {
+      const speed = Math.hypot(this.vx, this.vz) / S;
+      group.position.x = cx;
+      group.position.z = cz;
+      if (speed > 12) this.events.push({ type: 'wallSlam', x: cx, z: cz, speed });
+      this.vx = this.vz = 0;
+    }
+    return hit;
+  }
+
+  // (dx, dz) の向きへ、speed（リグ単位/秒）で up の高さへ打ち上げる
+  launch(dx, dz, speed, up) {
+    const { group, animator, scale: S } = this.c;
+    const len = Math.hypot(dx, dz) || 1;
+    this.vx = (dx / len) * speed * S;
+    this.vz = (dz / len) * speed * S;
+    this.vy = up * S;
+    if (this.s4) { this.s4 = null; this.skill4Cooldown = SKILL4.cooldown; }
+    if (this.s3) { this.s3 = null; this.skill3Ready = false; }
+    if (this.s2) { this.s2 = null; this.skill2Cooldown = SKILL2.cooldown; this.events.push({ type: 'skill2Cancel' }); }
+    this.state = 'launched';
+    this.attackActive = false;
+    animator.trailOn = false;
+    animator.leanTarget = animator.bankTarget = 0;
+    group.position.y = Math.max(group.position.y, 0.02 * S);
+    group.rotation.y = Math.atan2(-dx, -dz); // 攻撃してきた方を向いたまま、背中から飛ぶ
+    animator.play('thrown', 0.05);
+    this.events.push({ type: 'launched' });
+  }
+
+  updateLaunched(dt) {
+    const { group, animator, scale: S } = this.c;
+    this.vy -= MOVE.gravity * S * dt;
+    const drag = Math.exp(-0.6 * dt);
+    this.vx *= drag;
+    this.vz *= drag;
+    group.position.x += this.vx * dt;
+    group.position.z += this.vz * dt;
+    group.position.y += this.vy * dt;
+    group.rotation.x += (-1.2 - group.rotation.x) * (1 - Math.exp(-11 * dt)); // 背中をそらして飛ぶ
+    this.slamIntoWall();
+    if (group.position.y <= 0 && this.vy < 0) {
+      group.position.y = 0;
+      this.vy = 0;
+      this.vx *= 0.75;
+      this.vz *= 0.75;
+      group.rotation.x = -Math.PI / 2;
+      this.state = 'down';
+      this.downTimer = 1.4;
+      animator.play('down', 0.05);
+      this.events.push({ type: 'launchLand', x: group.position.x, z: group.position.z, speed: Math.hypot(this.vx, this.vz) / S });
+    }
+  }
+
+  // ============================================================
+  // スキル4: 剣を前へ向けて一瞬で飛びかかり、相手を遠くまで吹き飛ばす
+  // ============================================================
+  startSkill4() {
+    const { group, animator, scale: S } = this.c;
+    const v = this.victim;
+    let hasTarget = false;
+    if (v && (v.state === 'ground' || v.state === 'hit' || v.state === 'down')) {
+      const dx = v.c.group.position.x - group.position.x;
+      const dz = v.c.group.position.z - group.position.z;
+      hasTarget = Math.hypot(dx, dz) < SKILL4.range * S;
+    }
+    this.s4 = { phase: 'aim', t: 0, hasTarget, dirX: Math.sin(group.rotation.y), dirZ: Math.cos(group.rotation.y), fromX: 0, fromZ: 0, toX: 0, toZ: 0, hitDone: false };
+    this.state = 'skill4';
+    this.vx = this.vz = this.vy = 0;
+    this.attackActive = false;
+    animator.trailOn = false;
+    animator.leanTarget = animator.bankTarget = 0;
+    animator.attackT = 0;
+    animator.play('lungeAim', 0.1);
+    this.events.push({ type: 'skill4Start' });
+  }
+
+  updateSkill4(dt) {
+    const { group, animator, scale: S } = this.c;
+    const K = SKILL4;
+    const k = this.s4;
+    const v = this.victim;
+    k.t += dt;
+
+    if (k.phase === 'aim') {
+      // 構えている間も相手を狙い続ける
+      if (k.hasTarget) {
+        const dx = v.c.group.position.x - group.position.x;
+        const dz = v.c.group.position.z - group.position.z;
+        const d = Math.hypot(dx, dz) || 1;
+        k.dirX = dx / d;
+        k.dirZ = dz / d;
+      }
+      group.rotation.y += angleDiff(Math.atan2(k.dirX, k.dirZ), group.rotation.y) * (1 - Math.exp(-18 * dt));
+      animator.attackT = Math.min(1, k.t / K.aim);
+      if (k.t >= K.aim) {
+        // 飛びかかる距離を決める: 相手がいれば、その手前まで。いなければ前方へ
+        let len = K.noTarget * S;
+        if (k.hasTarget) {
+          const dx = v.c.group.position.x - group.position.x;
+          const dz = v.c.group.position.z - group.position.z;
+          len = Math.min(K.maxDash * S, Math.max(0, Math.hypot(dx, dz) - K.stopShort * S));
+        }
+        k.fromX = group.position.x;
+        k.fromZ = group.position.z;
+        k.toX = k.fromX + k.dirX * len;
+        k.toZ = k.fromZ + k.dirZ * len;
+        if (this.bounds) {
+          const b = this.bounds;
+          k.toX = Math.min(b.maxX - 0.2, Math.max(b.minX + 0.2, k.toX));
+          k.toZ = Math.min(b.maxZ - 0.2, Math.max(b.minZ + 0.2, k.toZ));
+        }
+        k.phase = 'dash';
+        k.t = 0;
+        animator.attackT = 0;
+        animator.trailOn = true;
+        animator.play('lungeDash', 0.03);
+        this.events.push({ type: 'skill4Dash', fromX: k.fromX, fromZ: k.fromZ, toX: k.toX, toZ: k.toZ });
+      }
+    } else if (k.phase === 'dash') {
+      const f = Math.min(1, k.t / K.dash);
+      const e = 1 - (1 - f) * (1 - f); // 飛び出しは速く、着く直前に少し緩む
+      group.position.x = k.fromX + (k.toX - k.fromX) * e;
+      group.position.z = k.fromZ + (k.toZ - k.fromZ) * e;
+      if (f >= 1) {
+        k.phase = 'hold';
+        k.t = 0;
+        animator.attackT = 0;
+        animator.play('lungeStrike', 0.03);
+        // 命中: 目の前に相手がいれば、遠くまで吹き飛ばす
+        const hittable = v && (v.state === 'ground' || v.state === 'hit' || v.state === 'down');
+        if (hittable) {
+          const dx = v.c.group.position.x - group.position.x;
+          const dz = v.c.group.position.z - group.position.z;
+          if (Math.hypot(dx, dz) < K.reach * S) {
+            k.hitDone = true;
+            const d = Math.hypot(dx, dz) || 1;
+            v.launch(dx / d, dz / d, K.launchSpeed, K.launchUp);
+            this.events.push({ type: 'skill4Hit', dirX: dx / d, dirZ: dz / d });
+          }
+        }
+      }
+    } else if (k.phase === 'hold') {
+      animator.trailOn = k.t < 0.12;
+      if (k.t >= K.hold) {
+        k.phase = 'recover';
+        k.t = 0;
+        animator.trailOn = false;
+      }
+    } else if (k.phase === 'recover') {
+      animator.attackT = Math.min(1, k.t / K.recover);
+      if (k.t >= K.recover) {
+        this.s4 = null;
+        this.state = 'ground';
+        this.skill4Cooldown = K.cooldown;
+      }
+    }
   }
 
   // ============================================================
@@ -783,6 +976,7 @@ export class CharacterController {
     this.vz = (dz / len) * speed;
     this.vy = 0;
     group.position.y = 0;
+    if (this.s4) { this.s4 = null; this.skill4Cooldown = SKILL4.cooldown; }
     if (this.s3) { this.s3 = null; this.skill3Ready = false; }
     if (this.s2) { this.s2 = null; this.skill2Cooldown = SKILL2.cooldown; this.events.push({ type: 'skill2Cancel' }); }
     this.state = 'hit';
@@ -796,6 +990,9 @@ export class CharacterController {
   update(dt, cmd) {
     const { group, animator, scale } = this.c;
     const S = scale;
+    this.status.update(dt);
+    // 気絶中は、立っているだけの状態になり、入力は受け付けない
+    if (this.status.has('stun') && this.state === 'ground') cmd = STUN_CMD;
     const moving = Math.hypot(cmd.x, cmd.z) > 0.01;
     const topSpeed = (cmd.run ? MOVE.runSpeed : MOVE.walkSpeed) * S;
 
@@ -810,9 +1007,22 @@ export class CharacterController {
 
     // 掴まれている・投げられている間は、相手側が位置と姿勢を動かす
     if (this.state === 'held' || this.state === 'thrown') return;
+    if (this.state === 'launched') {
+      this.updateLaunched(dt);
+      return;
+    }
     if (this.state === 'down') {
       this.downTimer -= dt;
-      if (this.downTimer <= 0) { this.state = 'ground'; group.position.y = 0; }
+      // 吹き飛ばされた勢いで、倒れたまま滑る
+      if (Math.hypot(this.vx, this.vz) > 0.01) {
+        const k = Math.exp(-4.5 * dt);
+        this.vx *= k;
+        this.vz *= k;
+        group.position.x += this.vx * dt;
+        group.position.z += this.vz * dt;
+        this.slamIntoWall();
+      }
+      if (this.downTimer <= 0) { this.state = 'ground'; group.position.y = 0; this.vx = this.vz = 0; }
       return;
     }
     if (this.state === 'finisher') {
@@ -831,6 +1041,11 @@ export class CharacterController {
     }
     if (this.state === 'skill3') {
       this.updateSkill3(dt, cmd);
+      return;
+    }
+    this.skill4Cooldown = Math.max(0, this.skill4Cooldown - dt);
+    if (this.state === 'skill4') {
+      this.updateSkill4(dt);
       return;
     }
     // コンボ技: 3段目を当てた直後にジャンプを押すと、相手を掴み上げる
@@ -936,7 +1151,9 @@ export class CharacterController {
     // ---- 状態ごとの処理 ----
     switch (this.state) {
       case 'ground': {
-        if (this.jumpBuffer > 0) {
+        if (this.status.has('stun')) {
+          animator.play('stunned', 0.18); // 気絶: ふらふら立っている
+        } else if (this.jumpBuffer > 0) {
           this.jumpBuffer = 0;
           this.state = 'crouch';
           this.timer = MOVE.crouchTime;
@@ -945,6 +1162,8 @@ export class CharacterController {
           this.startSkill3();
         } else if (cmd.skill && this.c.sword && this.skillCooldown <= 0) {
           this.startSkill();
+        } else if (cmd.skill4 && this.c.sword && this.skill4Cooldown <= 0) {
+          this.startSkill4();
         } else if (cmd.skill2 && this.c.sword && this.skill2Cooldown <= 0) {
           this.startSkill2();
         } else if (cmd.attack && this.c.sword) {
@@ -959,7 +1178,7 @@ export class CharacterController {
         } else {
           // 立ちへ戻る。攻撃・着地・急停止のあとは、ゆっくり構え直して少し揺り戻す
           const from = animator.name;
-          const recover = from.startsWith('attack') || from === 'land' || from === 'brake' || from === 'hit' || from === 'kick' || from === 'throwSword' || from === 'stabPull';
+          const recover = from.startsWith('attack') || from === 'land' || from === 'brake' || from === 'hit' || from === 'kick' || from === 'throwSword' || from === 'stabPull' || from === 'stunned' || from === 'lungeStrike';
           animator.play(this.idle, recover ? 0.38 : 0.22, recover);
         }
         break;

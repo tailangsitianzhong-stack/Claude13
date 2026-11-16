@@ -1019,7 +1019,77 @@ function chargeStance(ctx, o) {
   o.lShoulderSwing = 0.55; o.lShoulderOut = -0.75; o.lShoulderTwist = 0.6; o.lElbow = 1.45 + 0.15 * c - tr;
 }
 
+// ============================================================
+// 気絶: 立ったままふらふらする。首がぐらつき、腕はだらんと下がり、膝が抜けかけている
+// ============================================================
+function stunned(ctx, o) {
+  const t = ctx.time;
+  const sway = sin(t * 2.3);            // 体全体の大きなゆれ
+  const sway2 = sin(t * 3.7 + 1.1);
+  const loll = sin(t * 1.7 + 0.6);      // 首のぐらつき（ゆっくり）
+  o.hipsX = 0.1 * sway;
+  o.hipsRoll = -0.1 * sway;
+  o.hipsYaw = 0.12 * sway2;
+  o.waistPitch = 0.14 + 0.1 * sway2;
+  o.waistRoll = 0.17 * sway;
+  o.waistYaw = -0.18 * sway2;
+  o.neckPitch = 0.4 + 0.18 * loll;      // うなだれる
+  o.neckRoll = -0.34 * sway + 0.12 * loll;
+  o.neckYaw = 0.3 * sin(t * 1.3);
+  for (const [k, off] of SIDES) {
+    const sgn = off === 0 ? 1 : -1;
+    o[k + 'ShoulderSwing'] = 0.05 + 0.14 * sway2 * sgn;
+    o[k + 'ShoulderOut'] = 0.22 + 0.1 * sway * sgn;
+    o[k + 'ShoulderTwist'] = 0.15;
+    o[k + 'Elbow'] = 0.2;
+    o[k + 'HipSwing'] = 0.06 + 0.1 * sway * sgn;
+    o[k + 'HipOut'] = 0.12;
+    o[k + 'Knee'] = 0.38 + 0.2 * max(0, sway * sgn) + 0.1 * sin(t * 2.3 + off); // ひざがかくっと抜ける
+    o[k + 'Flat'] = 1;
+  }
+  o.swordTilt = 0.6 + 0.2 * sway2;      // 握った剣も下がって揺れる
+}
+
+// ============================================================
+// スキル4（突進）: 剣を前へ向けて低く構え（lungeAim）、一瞬で飛びかかる（lungeDash）、突きの姿勢で残る（lungeStrike）
+// ============================================================
+// 構え: 体を後ろへ引き、剣を相手へまっすぐ向ける。左手は後ろへ引いてバランス
+function lungeAim(ctx, o) {
+  const c = ctx.attackT; // 0〜1: ため具合（沈み込みと、腕の引き）
+  const tr = sin(ctx.time * 70) * 0.01 * c;
+  o.hipsYaw = -0.3 - 0.1 * c; o.waistYaw = -0.5 - 0.1 * c; o.neckYaw = 0.8;
+  o.hipsPitch = -0.04 + 0.1 * c; o.waistPitch = 0.12 + 0.12 * c + tr; o.neckPitch = -0.1;
+  o.lHipSwing = 0.62 + 0.18 * c; o.lKnee = 0.75 + 0.45 * c; o.lHipOut = 0.14; o.lFlat = 1;           // 前足を深く曲げる
+  o.rHipSwing = -0.55 - 0.15 * c; o.rKnee = 0.25 + 0.1 * c; o.rHipOut = 0.16; o.rFlat = 0.6;         // 後ろ足で蹴り出す準備
+  o.rShoulderSwing = 1.5 - 0.12 * c; o.rShoulderOut = -0.05; o.rShoulderTwist = 0.2; o.rElbow = 0.55 + 0.3 * c; // 肘を引いてためる
+  o.swordTilt = 1.35;                                                                                 // 切っ先は水平に前へ
+  o.lShoulderSwing = -0.5; o.lShoulderOut = 0.85; o.lElbow = 0.5;
+}
+
+// 飛びかかり: 体を水平に寝かせ、剣を先頭に一直線。足は後ろへ流れる
+function lungeDash(ctx, o) {
+  o.ground = 0;
+  o.lift = 0.5;
+  o.hipsPitch = 0.75; o.waistPitch = 0.3; o.neckPitch = -0.5; o.hipsYaw = -0.1; o.waistYaw = -0.1; o.neckYaw = 0.1;
+  o.lHipSwing = -0.7; o.lKnee = 0.3; o.lHipOut = 0.1; o.lAnkle = -0.6;
+  o.rHipSwing = -0.95; o.rKnee = 0.15; o.rHipOut = 0.1; o.rAnkle = -0.7;
+  o.rShoulderSwing = 1.85; o.rShoulderOut = -0.05; o.rShoulderTwist = 0.2; o.rElbow = 0.08; o.swordTilt = 0.95;
+  o.lShoulderSwing = 1.7; o.lShoulderOut = 0.18; o.lElbow = 0.3; // 左腕も前へそろえて、空気抵抗を減らす
+}
+
+// 突き: 踏み込んだ姿勢で、腕をいっぱいに伸ばして静止（attackT 0 → 1 で少し戻って構え直す）
+function lungeStrike(ctx, o) {
+  const r = ctx.attackT;
+  o.hipsYaw = 0.15; o.waistYaw = 0.25; o.neckYaw = -0.3;
+  o.hipsPitch = 0.3 * (1 - r); o.waistPitch = 0.45 * (1 - r) + 0.05;
+  o.lHipSwing = 1.05 - 0.4 * r; o.lKnee = 0.9 - 0.3 * r; o.lHipOut = 0.1; o.lFlat = 1;
+  o.rHipSwing = -0.8 + 0.3 * r; o.rKnee = 0.2; o.rHipOut = 0.12; o.rFlat = 0.7;
+  o.rShoulderSwing = 1.6; o.rShoulderOut = -0.02; o.rShoulderTwist = 0.2; o.rElbow = 0.04; o.swordTilt = 1.5;
+  o.lShoulderSwing = -0.85; o.lShoulderOut = 0.8; o.lElbow = 0.4;
+}
+
 export const POSES = {
+  stunned, lungeAim, lungeDash, lungeStrike,
   chargeStance,
   groundStab, stabCharge, stabPull,
   spinUp, throwSword, beckon, flurry, pullOut, kick, impaled, dragged, pummeled,

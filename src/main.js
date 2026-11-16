@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
-import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3 } from './character/Controller.js';
+import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4 } from './character/Controller.js';
 import { input } from './input.js';
 import { TouchControls } from './ui/TouchControls.js';
+import { StatusHud } from './ui/StatusHud.js';
 import { CameraFx } from './camera/CameraFx.js';
 import { ThirdPersonCamera } from './camera/ThirdPersonCamera.js';
 import { Sparks } from './effects/Sparks.js';
@@ -56,6 +57,7 @@ const dummy = new CharacterController(p2, { bounds: stage.bounds });
 player.target = p2;
 player.victim = dummy; // コンボ技で掴む相手
 dummy.idle = 'fight';
+const statusHud = new StatusHud('P2'); // 相手の状態異常の表示枠
 const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleStance: false };
 
 // 三人称の追従カメラ。最初は P1 の真後ろから
@@ -98,6 +100,7 @@ function readCommand() {
     skill: input.wasPressed('KeyK', 'KeyE') || touch.takeSkill(0),
     skillHold: input.isDown('KeyK', 'KeyE') || touch.skillHeld(0), // スキル3のため（押している間）
     skill2: input.wasPressed('KeyL', 'KeyQ') || touch.takeSkill(1),
+    skill4: input.wasPressed('KeyR', 'KeyU') || touch.takeSkill(2),
     toggleStance: input.wasPressed('KeyF'),
   };
 }
@@ -124,7 +127,9 @@ function toCameraSpace(character, [x, y, z]) {
 // 攻撃の節目ごとのカメラ演出
 function onAttackEvent(e) {
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type.startsWith('skill3')) {
+  if (e.type.startsWith('skill4')) {
+    onSkill4Event(e);
+  } else if (e.type.startsWith('skill3')) {
     onSkill3Event(e);
   } else if (e.type.startsWith('skill2')) {
     onSkill2Event(e);
@@ -257,6 +262,71 @@ function onSkillEvent(e) {
 
 let chargeSpark = 0; // ため中の光の粒を出す間隔（スキル2・3で共用）
 
+// ---- スキル4: 突進 ----
+function onSkill4Event(e) {
+  const h = p1.group.rotation.y;
+  if (e.type === 'skill4Start') {
+    fx.zoom(-40);
+    fx.kick(0, -0.25, 0.2);
+  } else if (e.type === 'skill4Dash') {
+    // 飛びかかり: 視野を一気に広げ、通り道に光の線と火花を走らせる
+    const dx = e.toX - e.fromX;
+    const dz = e.toZ - e.fromZ;
+    const len = Math.hypot(dx, dz);
+    fx.zoom(210);
+    fx.kick(0, 0.15, 1.6);
+    fx.shake(0.3);
+    v1.set(e.fromX, 0.03, e.fromZ);
+    impact.ring(v1, p1.height * 1.6, 0.3);
+    forward.set(Math.sin(h), 0, Math.cos(h));
+    sparks.burst(v1, forward.clone().negate(), 10, p1.height * 0.06, p1.height * 3.0, 0.25, 0.25); // 蹴り出しの土煙
+    if (len > 1e-3) {
+      const N = 5;
+      for (let i = 0; i < N; i++) {
+        const t = (i + 0.5) / N;
+        v1.set(e.fromX + dx * t, p1.height * 0.55, e.fromZ + dz * t);
+        impact.streak(v1, forward, camera, (len / N) * 0.75, 0.2);
+        sparks.burst(v1, forward.clone().negate(), 2, p1.height * 0.045, p1.height * 2.2, 0.53, 0.9);
+      }
+    }
+  } else if (e.type === 'skill4Hit') {
+    // 命中: 時間を止め、大きく寄り、画面を揺らす。相手は遠くへ吹き飛ぶ
+    hitStop = 0.24;
+    flash = 0.18;
+    fx.shake(1);
+    fx.zoom(-230);
+    fx.kick(0, 0.3, -1.6);
+    v1.set(p2.group.position.x, p2.height * 0.6, p2.group.position.z);
+    forward.set(e.dirX, 0, e.dirZ);
+    impact.flash(v1, p2.height * 3.6, 0.26);
+    impact.streak(v1, forward, camera, p2.height * 3.4, 0.2);
+    impact.ring(p2.group.position, p2.height * 2.4, 0.5);
+    impact.ring(p2.group.position, p2.height * 1.4, 0.32);
+    impact.wave(v1, Math.atan2(e.dirX, e.dirZ), Math.PI / 2, p2.height * 1.6, p2.height * 12, 0.4);
+    sparks.burst(v1, forward, 26, p2.height * 0.075, p2.height * 5.0);
+    sparks.burst(v1, forward, 14, p2.height * 0.06, p2.height * 3.4, 0.53, 0.9);
+  }
+}
+
+// 吹き飛ばされた相手の着地・壁への激突
+function onDummyEvent(e) {
+  if (e.type === 'launchLand') {
+    v1.set(e.x, 0.03, e.z);
+    impact.ring(v1, p2.height * 1.8, 0.4);
+    forward.set(0, 0, 0);
+    sparks.burst(v1, forward, 12, p2.height * 0.07, p2.height * 2.4, 0.25, 0.25);
+    fx.shake(0.4);
+  } else if (e.type === 'wallSlam') {
+    v1.set(e.x, p2.height * 0.5, e.z);
+    impact.flash(v1, p2.height * 2.6, 0.2);
+    impact.ring(p2.group.position, p2.height * 2.0, 0.4);
+    forward.set(0, 0, 0);
+    sparks.burst(v1, forward, 18, p2.height * 0.07, p2.height * 3.0, 0.07, 0.3);
+    hitStop = 0.1;
+    fx.shake(0.9);
+  }
+}
+
 // ---- スキル3: 飛ぶ斬撃 ----
 const slashes = []; // 飛んでいる斬撃 { x, z, dx, dz, left（残り距離）, radius, power, strong }
 
@@ -276,15 +346,16 @@ function onSkill3Event(e) {
     const triple = e.count === 3;
     const big = triple ? (e.last ? 1.5 : 1.15) : 0.7 + 0.6 * e.charge; // 1発だけのときは、ためた分だけ大きい
     const power = triple ? (e.last ? 3 : 2) : e.charge > 0.4 ? 2 : 1;
-    const ox = p1.group.position.x + Math.sin(h) * 2.5 * S;
-    const oz = p1.group.position.z + Math.cos(h) * 2.5 * S;
+    const ox = p1.group.position.x + Math.sin(h) * 3.5 * S;
+    const oz = p1.group.position.z + Math.cos(h) * 3.5 * S;
     slashes.push({ x: ox, z: oz, dx: Math.sin(h), dz: Math.cos(h), left: SKILL3.range * S, radius: SKILL3.radius * S * big, power, strong: power >= 3 });
     // 見た目: 三日月を重ねて厚みを出す
     v1.set(ox, p1.height * (e.index === 2 ? 0.75 : 0.6), oz);
     const dur = SKILL3.range / SKILL3.speed;
-    impact.wave(v1, h, WAVE_TILT[e.index], p1.height * 1.35 * big, SKILL3.speed * S, dur);
-    impact.wave(v1, h, WAVE_TILT[e.index] + 0.12, p1.height * 1.05 * big, SKILL3.speed * S, dur);
-    impact.wave(v1, h, WAVE_TILT[e.index] + Math.PI / 2, p1.height * 0.75 * big, SKILL3.speed * S, dur); // 直交させて、真後ろからも見えるように
+    const sz = big * SKILL3.size; // 見た目の大きさも当たり判定と同じく3倍
+    impact.wave(v1, h, WAVE_TILT[e.index], p1.height * 1.35 * sz, SKILL3.speed * S, dur);
+    impact.wave(v1, h, WAVE_TILT[e.index] + 0.12, p1.height * 1.05 * sz, SKILL3.speed * S, dur);
+    impact.wave(v1, h, WAVE_TILT[e.index] + Math.PI / 2, p1.height * 0.75 * sz, SKILL3.speed * S, dur); // 直交させて、真後ろからも見えるように
     const d = toCameraSpace(p1, SLASH_DIR[e.index]);
     fx.kick(d.x * 1.1, d.y * 1.1, 0.9);
     fx.roll(-d.x * 1.4);
@@ -334,8 +405,8 @@ function updateSkill3(dt, realDt) {
       impact.streak(v1, forward, camera, p2.height * (sl.strong ? 3.0 : 2.0));
       if (sl.strong) impact.ring(p2.group.position, p2.height * 2.0, 0.4);
       slashes.splice(i, 1);
-    } else if (sl.left <= 0) {
-      slashes.splice(i, 1);
+    } else if (sl.left <= 0 || Math.abs(sl.x) > stage.bounds.maxX + 1 || Math.abs(sl.z) > stage.bounds.maxZ + 1) {
+      slashes.splice(i, 1); // 距離を飛びきった、または闘技場の外へ出た
     }
   }
 }
@@ -418,6 +489,7 @@ function skill2Burst(cx, cz, radius) {
   const hittable = dummy.state === 'ground' || dummy.state === 'hit' || dummy.state === 'down';
   if (dist > radius || !hittable) return;
   dummy.hit(dist > 1e-4 ? dx : Math.sin(p1.group.rotation.y), dist > 1e-4 ? dz : Math.cos(p1.group.rotation.y), 3);
+  dummy.status.apply('stun', SKILL2.stun); // 気絶（状態異常）を付与
   hitStop = 0.16;
   flash = 0.14;
   v1.set(p2.group.position.x, p2.height * 0.55, p2.group.position.z);
@@ -589,18 +661,21 @@ function step(realDt) {
     touch.setSkillCharge(0, 0);
   }
   touch.setSkillCooldown(1, player.skill2Cooldown / SKILL2.cooldown, player.skill2Cooldown, player.state === 'skill2');
+  touch.setSkillCooldown(2, player.skill4Cooldown / SKILL4.cooldown, player.skill4Cooldown, player.state === 'skill4');
   comboPrompt.classList.toggle('show', canFinish);
 
   for (const e of player.events) onAttackEvent(e);
   player.events.length = 0;
+  for (const e of dummy.events) onDummyEvent(e);
   dummy.events.length = 0;
+  statusHud.update(dummy.status);
 
   // キャラ同士はすり抜けない（P1 を P2 の外へ押し出す）
   const minDist = 0.36 * (p1.height + p2.height) / 2;
   const sx = p1.group.position.x - p2.group.position.x;
   const sz = p1.group.position.z - p2.group.position.z;
   const sep = Math.hypot(sx, sz);
-  const grappling = player.state === 'finisher' || player.state === 'skill' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
+  const grappling = player.state === 'finisher' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
   if (!grappling && sep < minDist && sep > 1e-6 && p1.group.position.y < p2.height) {
     p1.group.position.x = p2.group.position.x + (sx / sep) * minDist;
     p1.group.position.z = p2.group.position.z + (sz / sep) * minDist;
@@ -613,7 +688,7 @@ function step(realDt) {
   }
 
   // P2 は（のけぞっていなければ）P1 の方を向き続ける
-  if (dummy.state === 'ground') {
+  if (dummy.state === 'ground' && !dummy.status.has('stun')) { // 気絶中はふらふらしたまま、向き直らない
     const want = Math.atan2(p1.group.position.x - p2.group.position.x, p1.group.position.z - p2.group.position.z);
     let diff = want - p2.group.rotation.y;
     diff -= Math.PI * 2 * Math.round(diff / (Math.PI * 2));
@@ -636,7 +711,7 @@ function step(realDt) {
   if (window.game.follow) {
     // 視点と移動は分離: 歩いても走ってもカメラの向きは変わらない。
     // 攻撃中だけ、狙っている相手が画面に収まるよう背後へゆっくり回り込む（視点を触った直後は回らない）
-    const align = player.state === 'skill3' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE }
+    const align = player.state === 'skill3' || player.state === 'skill4' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE }
       : player.state === 'attack' ? { heading: player.aimYaw, rate: ATTACK_ALIGN_RATE }
       : player.state === 'skill' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE } : null;
     // コンボ技の間はカメラを引き、高く跳んでも2人が画面に収まるようにする
@@ -648,11 +723,15 @@ function step(realDt) {
     const s2Zoom = !player.s2 ? 1 : player.s2.phase === 'charge' || player.s2.phase === 'stab' ? 0.85 : 2.0;
     // スキル3: ためるほど寄り、放つときは少し引く
     const s3Zoom = !player.s3 ? 1 : player.s3.phase === 'charge' ? 1 - 0.08 * player.s3.charge : 1.25;
-    view.zoomTarget = cinematic ? 2.3 : player.s2 ? s2Zoom : player.s3 ? s3Zoom : skillZoom;
+    // スキル4: 構えでじわっと寄り、飛びかかりで引く。吹き飛んだ相手を追うときは2人が収まる距離まで引く
+    const s4Zoom = !player.s4 ? 1 : player.s4.phase === 'aim' ? 0.88 : 1.2;
+    const chasing = dummy.state === 'launched' || (dummy.state === 'down' && Math.hypot(dummy.vx, dummy.vz) > p2.scale * 3);
+    view.zoomTarget = chasing ? 2.6 : cinematic ? 2.3 : player.s2 ? s2Zoom : player.s3 ? s3Zoom : player.s4 ? s4Zoom : skillZoom;
     view.heightFollow = cinematic ? 0.5 : 0.4;
     // スキル1で相手を捉えている間は、2人の中間を映す（投げた先の相手が画面から出ないように）
     let focus = p1.group.position;
-    if (player.sk && player.sk.hasTarget) focus = v1.lerpVectors(p1.group.position, p2.group.position, 0.5).setY(p1.group.position.y);
+    if (chasing) focus = v1.lerpVectors(p1.group.position, p2.group.position, 0.5).setY(0);
+    else if (player.sk && player.sk.hasTarget) focus = v1.lerpVectors(p1.group.position, p2.group.position, 0.5).setY(p1.group.position.y);
     view.update(realDt, focus, align);
   } else {
     camera.lookAt(controls.target);

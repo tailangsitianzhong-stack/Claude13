@@ -3,6 +3,7 @@ import { faceTexture } from './face.js';
 import { Animator } from './Animator.js';
 import { RIG } from './rig.js';
 import { createSword } from './Sword.js';
+import { StatusEffects } from './StatusEffects.js';
 import { SwordTrail } from '../effects/SwordTrail.js';
 
 // ロブロックス風の低コストキャラ。全部ただの箱＋顔デカール1枚。
@@ -124,6 +125,23 @@ export function createCharacter(options = {}) {
   hair.scale.setScalar(R.head / 1.2);
   neck.add(hair);
 
+  // ---- 気絶の星: 頭上をまわる黄色い星（気絶中だけ表示）----
+  const stars = new THREE.Group();
+  stars.visible = false;
+  const starGeo = new THREE.BoxGeometry(0.5, 0.5, 0.12);
+  const starMat = new THREE.MeshBasicMaterial({ color: 0xffd54a, fog: false });
+  const starMeshes = [];
+  for (let i = 0; i < 5; i++) {
+    const m = new THREE.Mesh(starGeo, starMat);
+    m.add(new THREE.Mesh(starGeo, starMat)); // 2枚を45度ずらして重ね、星形っぽく見せる
+    m.children[0].rotation.z = Math.PI / 4;
+    stars.add(m);
+    starMeshes.push(m);
+  }
+  stars.position.y = R.head + 0.7;
+  neck.add(stars);
+  let starTime = 0;
+
   // ---- 腕（肩 → 肘）----
   const makeArm = (side) => {
     const x = side * (R.chest[0] / 2 + R.armW / 2 + 0.04);
@@ -185,6 +203,10 @@ export function createCharacter(options = {}) {
 
   const animator = new Animator({ group, joints, soles, scale: o.scale, armed: !!sword });
 
+  // 状態異常: 付いた・切れたときの見た目の切り替え
+  const status = new StatusEffects();
+  status.onChange((name, on) => { if (name === 'stun') stars.visible = on; });
+
   // 被弾時などに全身を白く光らせる（0 = 通常, 1 = 真っ白）
   const materials = [];
   group.traverse((obj) => {
@@ -227,6 +249,16 @@ export function createCharacter(options = {}) {
     }
     lastAttackT = animator.attackT;
     if (trail) trail.update(dt);
+    if (stars.visible) {
+      starTime += dt;
+      starMeshes.forEach((m, i) => {
+        const a = starTime * 4.2 + (i / starMeshes.length) * Math.PI * 2;
+        m.position.set(Math.cos(a) * 1.25, Math.sin(starTime * 7 + i * 1.7) * 0.12, Math.sin(a) * 1.25);
+        m.rotation.y = -a; // 進行方向に正面を向ける
+        m.rotation.z = starTime * 5 + i;
+        m.scale.setScalar(0.85 + 0.25 * Math.sin(starTime * 9 + i * 2));
+      });
+    }
     if (sword) {
       // 斬撃のオーラ: 振りかぶりで灯り、斬っている間は全開、終わるとすっと消える
       const want = animator.trailOn ? 1 : animator.name === 'chargeStance' ? 0.2 + 0.4 * animator.attackT : animator.name === 'stabCharge' ? 0.55 + 0.45 * animator.attackT : animator.name === 'airSlam' || animator.name === 'throw' || animator.name === 'groundStab' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
@@ -244,6 +276,7 @@ export function createCharacter(options = {}) {
     scale: o.scale,
     height: (R.hipY + R.waistUp + R.chestTop + R.head) * o.scale,
     update,
+    status,
     sword,
     trail,
     setFlash,
