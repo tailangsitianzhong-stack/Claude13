@@ -209,6 +209,8 @@ export class CharacterController {
     this.skill4Ready = false; // スキル2のボタンがスキル4に変わっているか（スキル2を使い終えると true）
     this.s4 = null;           // スキル4の進行状況
     this.status = character.status; // 状態異常（気絶など）
+    this.attacks = ATTACKS;         // 通常攻撃のテーブル（武器ごとに差し替える）
+    this.weaponId = 'sword';
     this.health = new Health();     // HP
     this.gauge = new Gauge();       // 必殺技ゲージ
     this.ult = null;                // 必殺技の進行状況
@@ -233,8 +235,9 @@ export class CharacterController {
     this.attackT = 0;
     this.attackActive = false;
     this.hitDone = false;
+    this.tossed = false;
     animator.attackT = 0;
-    animator.play(ATTACKS[index].anim, index === 0 ? 0.08 : 0.1);
+    animator.play(this.attacks[index].anim, index === 0 ? 0.08 : 0.1);
 
     // 向き: 移動しながらのときは、今キャラが向いている方向で斬る（向きを変えたり、相手へ吸い付いたりしない）。
     // 止まっているときだけ、近くに相手がいればそちらを優先して向き直る
@@ -1392,7 +1395,7 @@ export class CharacterController {
     if (this.state === 'attack' && !moving) {
       // 止まって攻撃しているときだけ、踏み込みの区間で向いている方へ進む
       // （移動入力があるときは止まらず、そのまま歩き・走りの速さで動き続ける）
-      const [from, to, lungeSpeed] = ATTACKS[this.attackIndex].lunge;
+      const [from, to, lungeSpeed] = this.attacks[this.attackIndex].lunge;
       let v = this.attackT >= from && this.attackT <= to ? lungeSpeed * S : 0;
       // 正面に相手がいるときは、剣がちょうど届く間合いまで詰めて止まる（体が重ならない・空振りしにくい）
       if (this.target && v > 0) {
@@ -1403,7 +1406,7 @@ export class CharacterController {
         if (ahead > 0 && dist < AIM_ASSIST.range * S) {
           // 斬る瞬間（踏み込みの終わり）にちょうど間合いへ着く速さ。離れていれば速く、近ければ止まる
           const gap = dist - IDEAL_RANGE * S;
-          const remaining = Math.max(dt, (to - this.attackT) * ATTACKS[this.attackIndex].duration);
+          const remaining = Math.max(dt, (to - this.attackT) * this.attacks[this.attackIndex].duration);
           v = Math.max(0, Math.min(lungeSpeed * 2.6 * S, gap / remaining));
         }
       }
@@ -1440,7 +1443,7 @@ export class CharacterController {
 
     // 進む向きへなめらかに振り向く（攻撃中は振りかぶりの間だけ、狙った向きへ素早く）
     if (this.state === 'attack' && !moving) {
-      if (this.attackT < ATTACKS[this.attackIndex].active[0]) {
+      if (this.attackT < this.attacks[this.attackIndex].active[0]) {
         group.rotation.y += angleDiff(this.aimYaw, group.rotation.y) * (1 - Math.exp(-MOVE.turnRate * 2 * dt));
       }
     } else if (moving && this.state !== 'hit') {
@@ -1566,17 +1569,24 @@ export class CharacterController {
         break;
       }
       case 'attack': {
-        const a = ATTACKS[this.attackIndex];
+        const a = this.attacks[this.attackIndex];
         this.attackT += dt / a.duration;
         animator.attackT = Math.min(1, this.attackT);
         const active = this.attackT >= a.active[0] && this.attackT <= a.active[1];
-        if (active && !this.attackActive) this.events.push({ type: 'swing', index: this.attackIndex });
+        if (active && !this.attackActive) {
+          this.events.push({ type: 'swing', index: this.attackIndex });
+          if (a.ranged) this.events.push({ type: 'batBall', kind: 'normal', power: a.power }); // ボールを打つ攻撃: ここでボールが飛ぶ
+        }
+        if (a.tossAt !== undefined && !this.tossed && this.attackT >= a.tossAt) {
+          this.tossed = true; // ボールを放り上げる（打つまでの秒数を知らせる）
+          this.events.push({ type: 'batToss', time: (a.active[0] - a.tossAt) * a.duration });
+        }
         if (!active && this.attackActive && a.power > 1) this.events.push({ type: 'slam', index: this.attackIndex }); // 兜割りの着地
         this.attackActive = active;
         // 軌跡は当たり判定より少し早く出し始めて、振り始めから弧が見えるようにする
         animator.trailOn = this.attackT >= a.active[0] - 0.08 && this.attackT <= a.active[1] + 0.03;
         if (this.attackT >= a.chain && cmd.attack) {
-          this.startAttack((this.attackIndex + 1) % ATTACKS.length, cmd); // 押し続けていれば次の斬撃へ
+          this.startAttack((this.attackIndex + 1) % this.attacks.length, cmd); // 押し続けていれば次の斬撃へ
         } else if (this.attackT >= 1) {
           this.attackActive = false;
           animator.trailOn = false;

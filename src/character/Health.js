@@ -20,6 +20,13 @@ export const DAMAGE = {
   skill3: { 1: 35, 2: 60, 3: 110 }, // 斬撃の強さ別
   skill4: 100,
   wallSlam: 40,                   // 吹き飛んで壁に激突
+  // バット
+  bat: [32, 38, 55],              // 通常攻撃（横殴り・一回転・ボール）
+  batMetalShot: 140,              // スキル1: 金属バットで打つボール
+  batThrow: 45, batPunch: 9, batFinal: 110,   // スキル2: バット投げ・パンチ・最後の一撃
+  batSkill3Ball: 42,              // スキル3: ボール1発
+  batS4Punch: 10, batS4Smash: 130, // スキル4: パンチ・バットを回収しての一撃
+  batUltIron: 40, batUltHit: 55, batUltFinal: 150, // 必殺技: 鉄球・打ち返し・最後の一撃
   ultDagger: 40,                  // 必殺技: 小剣が刺さる
   ultSlash: 28,                   // 必殺技: 斬撃1回ぶん
   ultFinal: 160,                  // 必殺技: 最後の一撃

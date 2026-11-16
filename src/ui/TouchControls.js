@@ -204,6 +204,24 @@ const ULT_SVG = `
   <polygon points="32,10 35,25 50,22 38,31 46,45 32,37 18,45 26,31 14,22 29,25" fill="#fff59d" stroke="#6a1200" stroke-width="2"/>
 </svg>`;
 
+// ---- バット用のアイコン ----
+const svgWrap = (cls, inner) => `<svg ${cls ? `class="${cls}" ` : ''}viewBox="0 0 64 64" aria-hidden="true" stroke-linejoin="round" stroke-linecap="round">${inner}</svg>`;
+const BAT_SHAPE = (fill, edge) => `<path d="M30 8 Q30 5 33 5 Q36 5 36 8 L37 38 L34 46 L31 46 L28 38 Z" fill="${fill}" stroke="${edge}" stroke-width="2.4"/><rect x="30" y="45" width="5" height="12" rx="1" fill="#242424" stroke="${edge}" stroke-width="2"/><rect x="28.5" y="56" width="8" height="5" rx="2" fill="#a56e32" stroke="${edge}" stroke-width="2"/>`;
+const BALL = (cx, cy, r, fill = '#fff') => `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${fill}" stroke="#3a4560" stroke-width="2"/><path d="M${cx - r * 0.6} ${cy - r * 0.5} Q${cx} ${cy} ${cx - r * 0.6} ${cy + r * 0.5} M${cx + r * 0.6} ${cy - r * 0.5} Q${cx} ${cy} ${cx + r * 0.6} ${cy + r * 0.5}" fill="none" stroke="#d9302a" stroke-width="1.5"/>`;
+const BAT_ICONS = {
+  attack: svgWrap('', `<g transform="rotate(40 32 32)">${BAT_SHAPE('#c98d4a', '#4a2c10')}</g>`),
+  // スキル1: 金属のバットと、強い光のボール
+  skill1: svgWrap('icon-main', `<g transform="rotate(-35 28 34)">${BAT_SHAPE('#dde6f2', '#2c3a52')}</g><circle cx="50" cy="16" r="9" fill="#e8f4ff" stroke="#2c6ea8" stroke-width="2.2"/><path d="M50 2 V8 M50 24 V30 M36 16 H42 M58 16 H62" stroke="#fff" stroke-width="3"/>`),
+  // スキル3: ボールを連打
+  skill3: svgWrap('icon-alt', `${BALL(16, 40, 8)}${BALL(34, 30, 8)}${BALL(52, 20, 8)}<path d="M2 48 H10 M20 38 H28 M38 28 H46" stroke="#fff" stroke-width="3"/>`),
+  // スキル2: 投げたバットと、殴る拳
+  skill2: svgWrap('icon-main', `<g transform="rotate(70 36 28)">${BAT_SHAPE('#c98d4a', '#4a2c10')}</g><path d="M6 20 Q12 12 20 16 M4 30 Q10 24 18 27" fill="none" stroke="#fff" stroke-width="3"/><rect x="8" y="40" width="16" height="14" rx="4" fill="#fff" stroke="#5a2a00" stroke-width="2.4"/>`),
+  // スキル4: 空中で回るバット
+  skill4: svgWrap('icon-alt', `<g transform="rotate(30 32 32)">${BAT_SHAPE('#c98d4a', '#4a2c10')}</g><path d="M10 26 A24 24 0 0 1 36 8 M54 38 A24 24 0 0 1 28 56" fill="none" stroke="#fff" stroke-width="4"/><polygon points="38,2 40,14 28,10" fill="#fff"/><polygon points="26,62 24,50 36,54" fill="#fff"/>`),
+  // 必殺技: 鉄球
+  ult: svgWrap('', `<circle cx="32" cy="34" r="18" fill="#3b4150" stroke="#6a1200" stroke-width="3"/><ellipse cx="32" cy="34" rx="18" ry="6" fill="none" stroke="#aab6c8" stroke-width="3"/><circle cx="25" cy="27" r="4" fill="#fff" opacity="0.7"/><polygon points="32,2 35,12 46,8 40,17 52,20 41,24 50,32 38,29 32,40" fill="#fff59d" stroke="#6a1200" stroke-width="2" opacity="0.95"/>`),
+};
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -352,6 +370,22 @@ export class TouchControls {
       this.run = mag >= RUN_THRESHOLD;
     }
     this.base.classList.toggle('run', this.run);
+  }
+
+  // 武器に合わせて、ボタンのアイコンを入れ替える（'sword' は最初のまま。'bat' はバット用）
+  setWeapon(id) {
+    if (id !== 'bat') return;
+    const swap = (sel, icon, svgSel = 'svg') => {
+      const el = this.root.querySelector(sel);
+      const old = svgSel === 'svg' ? el.querySelector('svg') : el.querySelector(svgSel);
+      if (old) old.outerHTML = icon;
+    };
+    swap('#attack-btn', BAT_ICONS.attack);
+    swap('#skill-btn', BAT_ICONS.skill1, 'svg.icon-main');
+    swap('#skill-btn', BAT_ICONS.skill3, 'svg.icon-alt');
+    swap('#skill2-btn', BAT_ICONS.skill2, 'svg.icon-main');
+    swap('#skill2-btn', BAT_ICONS.skill4, 'svg.icon-alt');
+    swap('#ult-btn', BAT_ICONS.ult);
   }
 
   // 必殺技ボタン: ゲージがたまっている間だけ出す

@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
+import { BatController, BSKILL1, BSKILL2 } from './character/BatController.js';
+import { BatDirector } from './game/BatDirector.js';
+import { BatUltimateDirector } from './cinematic/BatUltimate.js';
 import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4, ultPath } from './character/Controller.js';
 import { FIGHT, DAMAGE } from './character/Health.js';
 import { FightHud } from './ui/FightHud.js';
@@ -56,13 +59,14 @@ p2.group.rotation.y = -Math.PI / 2;
 p2.animator.play('fight', 0); // P2 は構えポーズで待機
 scene.add(p1.group, p2.group);
 const characters = [p1, p2];
-for (const c of characters) { if (c.trail) scene.add(c.trail.mesh); if (c.trailGreat) scene.add(c.trailGreat.mesh); }
+for (const c of characters) { for (const t of [c.trail, c.trailGreat, c.trailBat]) if (t) scene.add(t.mesh); }
 
 // P1 をキーボードで操作。P2 は今のところ立っているだけ（攻撃を受けるとのけぞる）
-const player = new CharacterController(p1, { bounds: stage.bounds });
+let player = new CharacterController(p1, { bounds: stage.bounds });
+const swordPlayer = player;
+const batPlayer = new BatController(p1, { bounds: stage.bounds }); // バットを選んだときに使う
 const dummy = new CharacterController(p2, { bounds: stage.bounds });
-player.target = p2;
-player.victim = dummy; // コンボ技で掴む相手
+for (const pl of [swordPlayer, batPlayer]) { pl.target = p2; pl.victim = dummy; } // 狙う相手・コンボ技で掴む相手
 dummy.idle = 'fight';
 const statusHud = new StatusHud('P2'); // 相手の状態異常の表示枠
 const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleStance: false };
@@ -149,7 +153,7 @@ function dealDamage(amount, at, kind) {
 }
 
 // スキルを使うたびに、ゲージが少し溜まる
-const GAUGE_ON_USE = new Set(['skillStart', 'skill2Start', 'skill3Start', 'skill4Start', 'finisherGrab', 'airSlamStart']);
+const GAUGE_ON_USE = new Set(['batSkill1Start', 'batSkill2Start', 'batSkill3Start', 'batSkill4Start', 'skillStart', 'skill2Start', 'skill3Start', 'skill4Start', 'finisherGrab', 'airSlamStart']);
 // 当たった瞬間のダメージ（イベントで知らせてくる技）
 const EVENT_DAMAGE = {
   skillStick: DAMAGE.skill1Stick, skillPunch: DAMAGE.skill1Punch, skillPullOut: DAMAGE.skill1PullOut, skillKick: DAMAGE.skill1Kick,
@@ -181,7 +185,9 @@ function onAttackEvent(e) {
   if (player.state !== 'ult' && GAUGE_ON_USE.has(e.type)) player.gauge.add(FIGHT.gaugePerSkill);
   if (EVENT_DAMAGE[e.type]) dealDamage(EVENT_DAMAGE[e.type]);
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type.startsWith('ult')) {
+  if (e.type.startsWith('bat')) {
+    batDirector.onEvent(e);
+  } else if (e.type.startsWith('ult')) {
     ultDirector.onEvent(e);
   } else if (e.type.startsWith('skill4')) {
     onSkill4Event(e);
@@ -246,7 +252,7 @@ function onAttackEvent(e) {
     // 斬撃波: 振った向きの三日月が前へ飛ぶ（見た目だけ。当たり判定は剣とオーラ）
     const h = p1.group.rotation.y;
     v1.set(p1.group.position.x + Math.sin(h) * 0.25, p1.height * (strong ? 0.75 : 0.62), p1.group.position.z + Math.cos(h) * 0.25);
-    impact.wave(v1, h, WAVE_TILT[e.index], p1.height * (strong ? 1.15 : 0.95), p1.height * (strong ? 6 : 7.5));
+    if (player.weaponId !== 'bat') impact.wave(v1, h, WAVE_TILT[e.index], p1.height * (strong ? 1.15 : 0.95), p1.height * (strong ? 6 : 7.5)); // バットには斬撃波はない
   } else if (e.type === 'slam') {
     fx.shake(0.32);                       // 着地の衝撃
     fx.kick(0, -0.7, 0);
@@ -641,9 +647,9 @@ function distToSegmentXZ(px, pz, a, b) {
 }
 
 function checkHit() {
-  if (!player.attackActive || player.hitDone) { hadPrevTip = false; return; }
+  if (!player.attackActive || player.hitDone || player.attacks[player.attackIndex].ranged) { hadPrevTip = false; return; }
   p1.group.updateWorldMatrix(true, true);
-  bladeBase.copy(p1.sword.userData.base).applyMatrix4(p1.sword.matrixWorld);
+  bladeBase.copy(p1.sword.userData.base).applyMatrix4(p1.sword.matrixWorld); // sword: 今握っている武器
   bladeTip.copy(p1.sword.userData.tip).applyMatrix4(p1.sword.matrixWorld);
   const tx = p2.group.position.x;
   const tz = p2.group.position.z;
@@ -662,10 +668,10 @@ function checkHit() {
   player.hitDone = true;
   // 3段目を当てたら、少しの間だけコンボ技（掴み上げ）を出せる
   if (player.attackIndex === 2) player.finisherWindow = FINISHER.window;
-  const power = ATTACKS[player.attackIndex].power;
+  const power = player.attacks[player.attackIndex].power;
   const strong = power > 1;
   dummy.hit(dx, dz, power);
-  dealDamage(DAMAGE.attack[player.attackIndex]);
+  dealDamage((player.weaponId === 'bat' ? DAMAGE.bat : DAMAGE.attack)[player.attackIndex]);
 
   // 手応え: 時間を一瞬止め、画面を揺らし、ぐっと寄る
   hitStop = strong ? 0.13 : 0.07;
@@ -688,7 +694,8 @@ function checkHit() {
 }
 
 // ---- 必殺技のムービー演出 ----
-const ultDirector = new UltimateDirector({
+let ultDirector;
+const swordUlt = new UltimateDirector({
   scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, groundCracks, p1, p2, player, dummy, ultPath,
   hooks: {
     hitStop: (sec) => { hitStop = Math.max(hitStop, sec); },
@@ -706,12 +713,38 @@ const ultDirector = new UltimateDirector({
   },
 });
 
+ultDirector = swordUlt;
+// バットの必殺技（バッティングセンターのムービー）。剣のものと同じ hooks を使う
+const batUlt = new BatUltimateDirector({
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, p2, getPlayer: () => player,
+  hooks: swordUlt.ctx.hooks,
+});
+
+// ---- バット用の演出（ボールの飛行・命中など）----
+const batDirector = new BatDirector({
+  scene, camera, impact, sparks, fx, p1, p2, stage, dummy, getPlayer: () => player,
+  hooks: {
+    hitStop: (sec) => { hitStop = Math.max(hitStop, sec); },
+    flashFoe: (sec) => { flash = Math.max(flash, sec); },
+    damage: (amount, at, kind) => dealDamage(amount, at, kind),
+    groundBreak: (x, z, r) => groundBreak.trigger(x, z, r),
+  },
+});
+
 // ---- 試合前の武器選択 ----
 // 選んだ武器は game.weapon に入る。今は「剣」だけ（ほかの武器はあとから追加する）
 let started = false;
 let weapon = getWeapon();
 const weaponSelect = new WeaponSelect((id) => {
   weapon = getWeapon(id);
+  // 選んだ武器に切り替える: キャラの持ち物と、操作するコントローラ
+  p1.setWeapon(id);
+  player = id === 'bat' ? batPlayer : swordPlayer;
+  ultDirector = id === 'bat' ? batUlt : swordUlt;
+  window.game.player = player;
+  window.game.ult = ultDirector;
+  touch.setWeapon(id); // ボタンのアイコンを、武器に合わせる
+  if (id === 'bat') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（横殴り→一回転→ボール）　T / G: 必殺技　K / E: スキル1（金属バット弾）→ 使用後はスキル3（ボール連打）　L / Q: スキル2（バット投げ）→ 使用後はスキル4（空中バット）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   started = true;
   document.body.classList.remove('pre-match');
   fightHud.showBanner('READY', 'FIGHT!');
@@ -721,7 +754,7 @@ const weaponSelect = new WeaponSelect((id) => {
 document.body.classList.add('pre-match');
 
 // デバッグ用
-window.game = { start: () => weaponSelect.confirm(), isStarted: () => started, weapon, ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
+window.game = { start: (id) => { if (id) weaponSelect.select(id); weaponSelect.confirm(); }, isStarted: () => started, weapon, ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -754,20 +787,24 @@ function step(realDt) {
   const canFinish = player.finisherWindow > 0 && player.canGrab();
   touch.setSpecial(canFinish);
   // スキル1のボタン: スキル1を使ったあとはスキル3に変わる（ため中は、ため具合を表示）
-  touch.setSkillAlt(0, player.skill3Ready || player.state === 'skill3');
-  if (player.skill3Ready || player.state === 'skill3') {
-    touch.setSkillCooldown(0, 0, 0, player.s3 !== null && player.s3.phase === 'release');
-    touch.setSkillCharge(0, player.s3 && player.s3.phase === 'charge' ? player.s3.charge : 0);
+  // スキルボタンの表示。武器ごとに、「いま切り替わっているか」「使用中か」が違うので、コントローラの状態から決める
+  const bat = player.weaponId === 'bat';
+  const bs = bat ? player.bs?.n : 0;
+  const alt1 = bat ? player.skill3Ready || bs === 3 : player.skill3Ready || player.state === 'skill3';
+  const alt2 = bat ? player.skill4Ready || bs === 4 : player.skill4Ready || player.state === 'skill4';
+  touch.setSkillAlt(0, alt1);
+  if (alt1) {
+    touch.setSkillCooldown(0, 0, 0, bat ? bs === 3 : player.s3 !== null && player.s3.phase === 'release');
+    touch.setSkillCharge(0, !bat && player.s3 && player.s3.phase === 'charge' ? player.s3.charge : 0);
   } else {
-    touch.setSkillCooldown(0, player.skillCooldown / SKILL1.cooldown, player.skillCooldown, player.state === 'skill');
+    touch.setSkillCooldown(0, player.skillCooldown / (bat ? BSKILL1.cooldown : SKILL1.cooldown), player.skillCooldown, bat ? bs === 1 : player.state === 'skill');
     touch.setSkillCharge(0, 0);
   }
-  // スキル2のボタン: スキル2を使い終えるとスキル4に変わる（使うとスキル2に戻り、クールタイムの残りを表示）
-  touch.setSkillAlt(1, player.skill4Ready || player.state === 'skill4');
-  if (player.skill4Ready || player.state === 'skill4') {
-    touch.setSkillCooldown(1, 0, 0, player.state === 'skill4');
+  touch.setSkillAlt(1, alt2);
+  if (alt2) {
+    touch.setSkillCooldown(1, 0, 0, bat ? bs === 4 : player.state === 'skill4');
   } else {
-    touch.setSkillCooldown(1, player.skill2Cooldown / SKILL2.cooldown, player.skill2Cooldown, player.state === 'skill2');
+    touch.setSkillCooldown(1, player.skill2Cooldown / (bat ? BSKILL2.cooldown : SKILL2.cooldown), player.skill2Cooldown, bat ? bs === 2 : player.state === 'skill2');
   }
   comboPrompt.classList.toggle('show', canFinish);
 
@@ -821,6 +858,7 @@ function step(realDt) {
   p1.update(dt, checkHit); // 姿勢を進めるたびに、その時点の刃の位置で当たり判定
   p2.update(dt);
   sparks.update(dt, camera, p1.height * 1.1);
+  batDirector.update(dt);
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
   ultDirector.update(realDt);
   groundBreak.update(realDt);

@@ -40,7 +40,18 @@ const SWORD_ICON = `
   <rect x="28" y="82" width="8" height="18" fill="#7a4a28" stroke="#3b2210" stroke-width="2"/>
   <rect x="25" y="99" width="14" height="8" rx="2" fill="#e8c14a" stroke="#5a4210" stroke-width="2.4"/>
 </svg>`;
-const ICONS = { sword: SWORD_ICON };
+// バットのアイコン（斜めのバットと、野球ボール）
+const BAT_ICON = `
+<svg viewBox="0 0 64 110" aria-hidden="true" stroke-linejoin="round" stroke-linecap="round">
+  <g transform="rotate(18 32 50)">
+    <path d="M27 6 Q27 4 32 4 Q37 4 37 6 L38 62 L35 78 L29 78 L26 62 Z" fill="#c98d4a" stroke="#4a2c10" stroke-width="2.4"/>
+    <rect x="29" y="76" width="6" height="22" rx="1" fill="#242424" stroke="#000" stroke-width="2"/>
+    <rect x="27" y="97" width="10" height="7" rx="3" fill="#a56e32" stroke="#4a2c10" stroke-width="2"/>
+  </g>
+  <circle cx="14" cy="90" r="9" fill="#fff" stroke="#3a4560" stroke-width="2.2"/>
+  <path d="M8 86 Q14 90 8 95 M20 86 Q14 90 20 95" fill="none" stroke="#d9302a" stroke-width="1.6"/>
+</svg>`;
+const ICONS = { sword: SWORD_ICON, bat: BAT_ICON };
 const STAT_LABELS = { power: '攻撃力', speed: '速さ', reach: 'リーチ' };
 
 export class WeaponSelect {

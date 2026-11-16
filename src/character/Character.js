@@ -3,6 +3,7 @@ import { faceTexture } from './face.js';
 import { Animator } from './Animator.js';
 import { RIG } from './rig.js';
 import { createSword } from './Sword.js';
+import { createBat } from './Bat.js';
 import { StatusEffects } from './StatusEffects.js';
 import { SwordTrail } from '../effects/SwordTrail.js';
 
@@ -217,7 +218,18 @@ export function createCharacter(options = {}) {
     joints.rWrist.add(great);
     trailGreat = new SwordTrail(great);
   }
-  // 今握っている剣（軌跡・オーラはこちらに付ける）
+  // ---- バット（右手。武器選択でバットを選んだときだけ表示する）----
+  let bat = null;
+  let trailBat = null;
+  let weaponId = 'sword';
+  if (o.sword) {
+    bat = createBat();
+    bat.position.set(0, -R.hand / 2, 0);
+    bat.visible = false;
+    joints.rWrist.add(bat);
+    trailBat = new SwordTrail(bat);
+  }
+  // 今握っている武器（軌跡・オーラはこちらに付ける）
   let held = sword;
   let heldTrail = trail;
   // 装備の切り替え: 'normal'（片手剣） | 'great'（両手剣） | 'none'
@@ -229,8 +241,19 @@ export function createCharacter(options = {}) {
     heldTrail = kind === 'great' ? trailGreat : kind === 'normal' ? trail : null;
   };
   if (o.great) equip('great');
+  // 武器の切り替え: 'sword' | 'bat'
+  const setWeapon = (id) => {
+    if (!sword) return;
+    weaponId = id;
+    sword.visible = id === 'sword';
+    bat.visible = id === 'bat';
+    great.visible = false;
+    held = id === 'bat' ? bat : sword;
+    heldTrail = id === 'bat' ? trailBat : trail;
+    animator.armed = id === 'bat' ? 'bat' : 'sword';
+  };
 
-  const animator = new Animator({ group, joints, soles, scale: o.scale, armed: !!sword });
+  const animator = new Animator({ group, joints, soles, scale: o.scale, armed: sword ? 'sword' : false });
 
   // 状態異常: 付いた・切れたときの見た目の切り替え
   const status = new StatusEffects();
@@ -279,6 +302,7 @@ export function createCharacter(options = {}) {
     lastAttackT = animator.attackT;
     if (trail) trail.update(dt);
     if (trailGreat) trailGreat.update(dt);
+    if (trailBat) trailBat.update(dt);
     if (stars.visible) {
       starTime += dt;
       starMeshes.forEach((m, i) => {
@@ -291,7 +315,7 @@ export function createCharacter(options = {}) {
     }
     if (held) {
       // 斬撃のオーラ: 振りかぶりで灯り、斬っている間は全開、終わるとすっと消える
-      const want = animator.trailOn ? 1 : animator.name === 'chargeStance' ? 0.2 + 0.4 * animator.attackT : animator.name === 'stabCharge' ? 0.55 + 0.45 * animator.attackT : animator.name === 'ultDash' || animator.name === 'ultWindup' || animator.name === 'ultLeap' ? 1 : animator.name === 'ultSummon' ? 0.3 + 0.7 * animator.attackT : animator.name === 'airSlam' || animator.name === 'throw' || animator.name === 'groundStab' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
+      const want = animator.trailOn ? 1 : animator.name === 'batMetal' ? 0.9 : animator.name === 'chargeStance' ? 0.2 + 0.4 * animator.attackT : animator.name === 'stabCharge' ? 0.55 + 0.45 * animator.attackT : animator.name === 'ultDash' || animator.name === 'ultWindup' || animator.name === 'ultLeap' ? 1 : animator.name === 'ultSummon' ? 0.3 + 0.7 * animator.attackT : animator.name === 'airSlam' || animator.name === 'throw' || animator.name === 'groundStab' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
       auraLevel += (want - auraLevel) * (1 - Math.exp(-(want > auraLevel ? 30 : 9) * dt));
       auraTime += dt;
       held.userData.setAura(animator.debug ? (animator.debug.aura ?? 0) : auraLevel, auraTime);
@@ -307,8 +331,13 @@ export function createCharacter(options = {}) {
     height: (R.hipY + R.waistUp + R.chestTop + R.head) * o.scale,
     update,
     status,
-    sword,
+    get sword() { return held; },        // 今握っている武器（剣またはバット）。コントローラや当たり判定はこれを見る
+    get weapon() { return weaponId; },
+    swordModel: sword,
+    bat,
     trail,
+    trailBat,
+    setWeapon,
     dagger,
     great,
     trailGreat,
