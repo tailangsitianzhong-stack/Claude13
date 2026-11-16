@@ -77,6 +77,7 @@ export class Impact {
     make('streak', 4, () => new THREE.Mesh(new THREE.PlaneGeometry(1, 1), glow(0xcff4ff)));
     make('ring', 3, () => new THREE.Mesh(new THREE.RingGeometry(0.78, 1, 40).rotateX(-Math.PI / 2), glow(0x9fe6ff)));
     make('wave', 12, () => new THREE.Mesh(crescentGeometry(2.3, 1, 0.34), glow(0x6fdcff)));
+    make('wind', 14, () => new THREE.Mesh(crescentGeometry(2.3, 1, 0.3), glow(0xf2fbff))); // バットの風（白）
   }
 
   take(kind) {
@@ -123,8 +124,8 @@ export class Impact {
    * 斬撃波。origin から heading の向きへ飛ぶ。
    * tilt: 弧の面の傾き（0 = 水平の横薙ぎ、±で斜め、π/2 で縦）
    */
-  wave(origin, heading, tilt, size, speed, duration = 0.28) {
-    const it = this.start('wave', duration, size);
+  wave(origin, heading, tilt, size, speed, duration = 0.28, kind = 'wave') {
+    const it = this.start(kind, duration, size);
     it.obj.position.copy(origin);
     it.obj.rotation.set(0, heading, tilt, 'YXZ');
     it.vel.set(Math.sin(heading) * speed, 0, Math.cos(heading) * speed);
@@ -146,6 +147,10 @@ export class Impact {
       } else if (it.kind === 'ring') {
         o.scale.setScalar(it.size * (0.15 + 0.85 * easeOut(t)));
         o.material.opacity = 0.9 * (1 - t);
+      } else if (it.kind === 'wind') {
+        o.position.addScaledVector(it.vel, dt);
+        o.scale.set(it.size * (0.6 + 0.9 * easeOut(t)), it.size * (0.6 + 0.5 * easeOut(t)), it.size * (0.6 + 0.9 * easeOut(t)));
+        o.material.opacity = 0.7 * (1 - t * t);
       } else {
         o.position.addScaledVector(it.vel, dt);
         o.scale.setScalar(it.size * (0.8 + 0.5 * easeOut(t)));

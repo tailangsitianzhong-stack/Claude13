@@ -7,7 +7,7 @@ const tmp = new THREE.Vector3();
 
 // 下半身として扱う項目（移動しながら攻撃するとき、ここだけ歩き・走りのサイクルに置き換える）
 const LOWER = [
-  'hipsX', 'hipsFree', 'lift', 'ground', 'hipsPitch', 'hipsYaw', 'hipsRoll',
+  'hipsX', 'hipsZ', 'hipsFree', 'lift', 'ground', 'hipsPitch', 'hipsYaw', 'hipsRoll',
   ...['l', 'r'].flatMap((k) => ['HipSwing', 'HipOut', 'HipTwist', 'Knee', 'Ankle', 'Flat'].map((f) => k + f)),
 ];
 const locoWalk = makePose();
@@ -155,7 +155,7 @@ export class Animator {
     j.lWrist.rotation.set(p.daggerTilt, 0, 0);
 
     // ---- 接地: 一番低い靴底が地面（ルートの高さ）に来るよう腰を上下させる ----
-    j.hips.position.set(p.hipsX, RIG.hipY, 0);
+    j.hips.position.set(p.hipsX, RIG.hipY, p.hipsZ);
     let hipY = RIG.hipY + p.hipsFree;
     if (p.ground > 0) {
       this.group.updateWorldMatrix(true, true);

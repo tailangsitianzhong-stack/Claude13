@@ -19,7 +19,7 @@ const LIMB = [
   'HipSwing', 'HipOut', 'HipTwist', 'Knee', 'Ankle', 'Flat',
 ];
 export const FIELDS = [
-  'hipsX', 'hipsFree', 'lift', 'ground',
+  'hipsX', 'hipsZ', 'hipsFree', 'lift', 'ground',
   'hipsPitch', 'hipsYaw', 'hipsRoll',
   'waistPitch', 'waistYaw', 'waistRoll',
   'neckPitch', 'neckYaw', 'neckRoll',
@@ -1226,163 +1226,384 @@ function ultLand(ctx, o) {
 }
 
 // ============================================================
-// バット用のポーズ
+// バット用のポーズ（野球の動きを全身で）
+//
+// 参考にした野球の動作（打撃）: 構え → ため（体重を後ろ足へ・前足を上げる）→ 踏み込み（前足を着く）→ 骨盤の回転が先に始まり、
+// 肩・腕・バットが遅れてついてくる（下半身→体幹→腕の順）→ 打撃 → フォロースルー（バットが肩の上へ巻き込む）。
+// （投球）: 脚上げ → 踏み込み → 腕を引いてためる → 腰の回転から腕が振られる → リリース → フォロースルー。
+//
+// 向き（キャラは +Z を向く。+yaw は左へ回る）: 右打ちの構えは、体を右へ向けて（負の yaw）左肩を相手に向け、
+// 首だけ相手を見る。前足は左足。足を踏み出す向きは、腰を回してあるので hipOut（外へ開く）で表す。
 // ============================================================
-// 持ち歩き（バットを右肩にかつぐ）。剣の carrySword のバット版
+const bset = (o, f) => Object.assign(o, f);
+const mirrorPose = (o) => {
+  for (const f of LIMB) { const l = o['l' + f]; o['l' + f] = o['r' + f]; o['r' + f] = l; }
+  for (const f of ['hipsYaw', 'waistYaw', 'neckYaw', 'hipsRoll', 'waistRoll', 'neckRoll', 'hipsX']) o[f] = -o[f];
+  const t = o.swordTilt; o.swordTilt = o.daggerTilt; o.daggerTilt = t;
+};
+
+// 右打ちの構え（体は右向き、首は相手を見る。体重は後ろ足、膝はゆるめる）
+const STANCE = {
+  hipsYaw: -0.8, waistYaw: -0.5, neckYaw: 1.2, hipsPitch: 0.1, waistPitch: 0.2, neckPitch: -0.05, hipsX: -0.08, hipsZ: 0,
+  lHipSwing: 0.05, lKnee: 0.5, lHipOut: 0.4, lFlat: 1,
+  rHipSwing: 0.1, rKnee: 0.6, rHipOut: 0.4, rFlat: 1,
+};
+// 両手で握った構え（バットを右肩の後ろへ立てる）
+const handsBack = (o, dy = 0) => bset(o, {
+  rShoulderSwing: 0.75 + dy, rShoulderOut: 0.4, rShoulderTwist: 0.15, rElbow: 1.9, swordTilt: 1.2 + dy,
+  lShoulderSwing: 1.0 + dy, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.7,
+});
+
+// 持ち歩き（バットを右肩にかつぐ）。剣の carrySword のバット版。fight は打者の構え全体
 export function carryBat(name, ctx, o) {
   const t = ctx.time;
   switch (name) {
-    case 'stand': // 右肩にバットをかついで、力を抜いて立つ
-      o.rShoulderSwing = 0.45; o.rShoulderOut = 0.4; o.rShoulderTwist = 0.1; o.rElbow = 1.95 + 0.03 * sin(t * 1.6);
-      o.swordTilt = 0.75; o.swordTwist = 0.0;
+    case 'stand': // 右肩にバットをかついで、力を抜いて立つ。左手は腰
+      bset(o, { rShoulderSwing: 0.45, rShoulderOut: 0.4, rShoulderTwist: 0.1, rElbow: 1.95 + 0.03 * sin(t * 1.6), swordTilt: 0.75, swordTwist: 0 });
+      o.lShoulderOut = 0.35; o.lElbow = 0.5;
       break;
-    case 'fight': // バッターの構え: 肩の上でバットを立てて、小さく揺らす
-      o.rShoulderSwing = 0.7; o.rShoulderOut = 0.4; o.rShoulderTwist = 0.2; o.rElbow = 1.8 + 0.06 * sin(t * 5.2);
-      o.swordTilt = 1.0 + 0.05 * sin(t * 5.2); o.swordTwist = 0.0;
+    case 'fight': { // 打者の構え: 小さく体を揺らし、バットをゆらす（ワッグル）
+      const rock = sin(t * 3.4);
+      bset(o, STANCE);
+      handsBack(o);
+      o.hipsX = -0.1 + 0.03 * rock;
+      o.hipsRoll = -0.04 * rock;
+      o.waistPitch += 0.02 * rock;
+      o.lKnee += 0.06 * rock; o.rKnee -= 0.05 * rock;
+      o.swordTilt += 0.1 * sin(t * 6.8);         // バットをゆらす
+      o.rElbow += 0.07 * sin(t * 6.8 + 0.5);
+      o.lElbow += 0.07 * sin(t * 6.8 + 0.5);
       break;
+    }
     case 'walk':
-      o.rShoulderSwing = 0.45 + (o.rShoulderSwing - 0.04) * 0.12; o.rShoulderOut = 0.4; o.rShoulderTwist = 0.1;
-      o.rElbow = 1.95; o.swordTilt = 0.75; o.swordTwist = 0.0;
+      bset(o, { rShoulderSwing: 0.45 + (o.rShoulderSwing - 0.04) * 0.12, rShoulderOut: 0.4, rShoulderTwist: 0.1, rElbow: 1.95, swordTilt: 0.75, swordTwist: 0 });
       break;
     case 'run':
-      o.rShoulderSwing = 0.6 + (o.rShoulderSwing - 0.12) * 0.1; o.rShoulderOut = 0.45; o.rShoulderTwist = 0.1;
-      o.rElbow = 1.9; o.swordTilt = 0.95; o.swordTwist = 0.0;
+      bset(o, { rShoulderSwing: 0.6 + (o.rShoulderSwing - 0.12) * 0.1, rShoulderOut: 0.45, rShoulderTwist: 0.1, rElbow: 1.9, swordTilt: 0.95, swordTwist: 0 });
       break;
     case 'crouch': case 'land':
-      o.rShoulderSwing = 0.5; o.rShoulderOut = 0.4; o.rElbow = 1.9; o.swordTilt = 0.8;
+      bset(o, { rShoulderSwing: 0.5, rShoulderOut: 0.4, rElbow: 1.9, swordTilt: 0.8 });
       break;
     case 'air':
-      o.rShoulderSwing = 0.8; o.rShoulderOut = 0.5; o.rElbow = 1.7; o.swordTilt = 0.9;
+      bset(o, { rShoulderSwing: 0.8, rShoulderOut: 0.5, rElbow: 1.7, swordTilt: 0.9 });
       break;
     default:
       break;
   }
 }
 
-// --- 3段目: ボールを放り上げて打つ（attackT 0〜1）---
-const B3 = [
-  { t: 0, pose: (o) => { // 構え: バットを肩の後ろへ引き、左手は低く
-    o.hipsYaw = -0.3; o.waistYaw = -0.55; o.neckYaw = 0.85; o.waistPitch = 0.08;
-    o.lHipSwing = 0.45; o.lKnee = 0.55; o.lHipOut = 0.18; o.lFlat = 1;
-    o.rHipSwing = -0.3; o.rKnee = 0.45; o.rHipOut = 0.2; o.rFlat = 0.9;
-    o.rShoulderSwing = 0.75; o.rShoulderOut = 0.5; o.rElbow = 1.85; o.swordTilt = 0.95;
-    o.lShoulderSwing = 0.3; o.lShoulderOut = 0.25; o.lElbow = 0.6;
+// ---- 標準のスイング（attackB1）。0.5 でボールを捉える ----
+const SWING = [
+  { t: 0, pose: (o) => { bset(o, STANCE); handsBack(o); } },
+  { t: 0.14, ease: 'inout', pose: (o) => { // ため: 体重を後ろ足へ、前足（左）を上げる
+    bset(o, STANCE); handsBack(o, -0.12);
+    bset(o, { hipsX: -0.18, hipsYaw: -0.95, waistYaw: -0.55, hipsPitch: 0.12, lHipSwing: 0.9, lKnee: 1.2, lHipOut: 0.25, rKnee: 0.8 });
   } },
-  { t: 0.22, ease: 'out', pose: (o) => { // 左手でボールを放り上げる。体を沈めてためる
-    o.hipsYaw = -0.4; o.waistYaw = -0.7; o.neckYaw = 0.5; o.waistPitch = 0.0;
-    o.lHipSwing = 0.6; o.lKnee = 0.8; o.lHipOut = 0.18; o.lFlat = 1;
-    o.rHipSwing = -0.35; o.rKnee = 0.6; o.rHipOut = 0.2; o.rFlat = 0.8;
-    o.rShoulderSwing = 0.9; o.rShoulderOut = 0.55; o.rElbow = 1.95; o.swordTilt = 0.85;
-    o.lShoulderSwing = 2.4; o.lShoulderOut = 0.1; o.lElbow = 0.35;
+  { t: 0.3, ease: 'out', pose: (o) => { // 踏み込み: 前足を相手側へ大きく踏み出して着く。肩は閉じたまま（コイル）
+    bset(o, STANCE); handsBack(o, -0.2);
+    bset(o, { hipsX: -0.04, hipsYaw: -0.9, waistYaw: -0.8, hipsPitch: 0.12, lHipSwing: 0.1, lKnee: 0.4, lHipOut: 0.85, rKnee: 0.75, rHipOut: 0.35, waistPitch: 0.24 });
   } },
-  { t: 0.5, ease: 'in', pose: (o) => { // ボールを捉える: 腕が水平に伸びる
-    o.hipsYaw = 0.1; o.waistYaw = 0.2; o.neckYaw = -0.1; o.waistPitch = 0.14; o.hipsPitch = 0.04;
-    o.lHipSwing = 0.65; o.lKnee = 0.75; o.lHipOut = 0.14; o.lFlat = 1;
-    o.rHipSwing = -0.4; o.rKnee = 0.35; o.rHipOut = 0.16; o.rFlat = 0.3;
-    o.rShoulderSwing = 1.5; o.rShoulderOut = 0.0; o.rElbow = 0.15; o.swordTilt = 1.65;
-    o.lShoulderSwing = -0.3; o.lShoulderOut = 0.7; o.lElbow = 0.5;
+  { t: 0.43, ease: 'in', pose: (o) => { // 腰が先に回る。肩と腕とバットは遅れて、バットはまだ立ったまま
+    bset(o, STANCE);
+    bset(o, { hipsYaw: -0.1, waistYaw: -0.65, hipsPitch: 0.1, waistPitch: 0.26, neckYaw: 0.7, hipsX: 0.0, lHipSwing: 0.1, lKnee: 0.35, lHipOut: 0.85, rKnee: 0.5, rHipOut: 0.4, rFlat: 0.55,
+      rShoulderSwing: 0.95, rShoulderOut: 0.35, rShoulderTwist: 0.15, rElbow: 1.35, swordTilt: 1.2,
+      lShoulderSwing: 1.1, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.3 });
   } },
-  { t: 0.68, ease: 'out', pose: (o) => { // 振り抜き
-    o.hipsYaw = 0.5; o.waistYaw = 0.85; o.neckYaw = -0.8; o.waistPitch = 0.12;
-    o.lHipSwing = 0.7; o.lKnee = 0.8; o.lHipOut = 0.14; o.lFlat = 1;
-    o.rHipSwing = -0.5; o.rKnee = 0.4; o.rHipOut = 0.16; o.rFlat = 0.25;
-    o.rShoulderSwing = 1.3; o.rShoulderOut = -0.7; o.rElbow = 0.5; o.swordTilt = 1.4;
-    o.lShoulderSwing = -0.6; o.lShoulderOut = 0.6; o.lElbow = 0.5;
+  { t: 0.5, ease: 'in', pose: (o) => { // 打撃: 前足で踏ん張り、後ろ足はつま先立ち。腕とバットが水平に伸びる
+    bset(o, STANCE);
+    bset(o, { hipsYaw: 0.25, waistYaw: -0.45, hipsPitch: 0.08, waistPitch: 0.28, neckYaw: 0.4, neckPitch: 0.1, hipsX: 0.04, lHipSwing: 0.1, lKnee: 0.15, lHipOut: 0.9, rKnee: 0.4, rHipOut: 0.35, rFlat: 0.2,
+      rShoulderSwing: 1.5, rShoulderOut: 0.0, rShoulderTwist: 0.15, rElbow: 0.2, swordTilt: 1.7,
+      lShoulderSwing: 1.5, lShoulderOut: -0.4, lShoulderTwist: 0.7, lElbow: 0.3 });
   } },
-  { t: 1, ease: 'out', pose: (o) => {
-    o.hipsYaw = 0.45; o.waistYaw = 0.75; o.neckYaw = -0.7; o.waistPitch = 0.1;
-    o.lHipSwing = 0.6; o.lKnee = 0.7; o.lHipOut = 0.14; o.lFlat = 1;
-    o.rHipSwing = -0.4; o.rKnee = 0.4; o.rHipOut = 0.16; o.rFlat = 0.4;
-    o.rShoulderSwing = 1.1; o.rShoulderOut = -0.6; o.rElbow = 0.8; o.swordTilt = 1.2;
-    o.lShoulderSwing = -0.4; o.lShoulderOut = 0.5; o.lElbow = 0.6;
+  { t: 0.64, ease: 'out', pose: (o) => { // フォロースルー: 腰も肩も大きく回り、バットが体に巻きつく
+    bset(o, STANCE);
+    bset(o, { hipsYaw: 0.9, waistYaw: 0.4, hipsPitch: 0.06, waistPitch: 0.2, neckYaw: -0.3, hipsX: 0.1, lHipSwing: 0.05, lKnee: 0.12, lHipOut: 0.85, rKnee: 0.7, rHipOut: 0.2, rFlat: 0.0,
+      rShoulderSwing: 1.3, rShoulderOut: -0.2, rShoulderTwist: 0.15, rElbow: 1.1, swordTilt: 0.8,
+      lShoulderSwing: 1.2, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.2 });
+  } },
+  { t: 1, ease: 'out', pose: (o) => { // 振り終わり: バットが左肩の後ろへ。体重は前足
+    bset(o, STANCE);
+    bset(o, { hipsYaw: 0.75, waistYaw: 0.5, hipsPitch: 0.08, waistPitch: 0.15, neckYaw: -0.4, hipsX: 0.1, lHipSwing: 0.05, lKnee: 0.25, lHipOut: 0.8, rKnee: 0.6, rHipOut: 0.2, rFlat: 0.3,
+      rShoulderSwing: 1.1, rShoulderOut: -0.15, rShoulderTwist: 0.15, rElbow: 1.6, swordTilt: 0.5,
+      lShoulderSwing: 1.0, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.5 });
   } },
 ];
-const attackB3 = (ctx, o) => keyed(ctx.attackT, B3, o);
+const attackB1 = (ctx, o) => keyed(ctx.attackT, SWING, o);
 
-// --- 2段目: 一回転して振り回す（attackT 0〜1）。腕は水平に伸ばしたまま、体ごと360度まわる ---
+// ---- 強打のスイング（attackBP。スキル1）: ためも踏み込みも回転も、ひと回り大きい ----
+const POWER = [
+  { t: 0, pose: (o) => { bset(o, STANCE); handsBack(o); } },
+  { t: 0.18, ease: 'inout', pose: (o) => { // 深くためる: 大きく脚を上げ、体重を深く後ろへ。バットを後ろへ倒す
+    bset(o, STANCE); handsBack(o, -0.3);
+    bset(o, { hipsX: -0.26, hipsYaw: -1.1, waistYaw: -0.65, hipsPitch: 0.16, lHipSwing: 1.3, lKnee: 1.5, lHipOut: 0.2, rKnee: 1.0, waistPitch: 0.26, neckYaw: 1.5 });
+  } },
+  { t: 0.34, ease: 'out', pose: (o) => { // 大きな踏み込み
+    bset(o, STANCE); handsBack(o, -0.35);
+    bset(o, { hipsX: -0.05, hipsYaw: -1.1, waistYaw: -0.95, hipsPitch: 0.18, lHipSwing: 0.1, lKnee: 0.45, lHipOut: 1.05, rKnee: 0.95, rHipOut: 0.4, waistPitch: 0.3, neckYaw: 1.6 });
+  } },
+  { t: 0.45, ease: 'in', pose: (o) => {
+    bset(o, STANCE);
+    bset(o, { hipsYaw: -0.05, waistYaw: -0.85, hipsPitch: 0.12, waistPitch: 0.3, neckYaw: 0.9, lHipSwing: 0.1, lKnee: 0.35, lHipOut: 1.0, rKnee: 0.6, rHipOut: 0.4, rFlat: 0.45,
+      rShoulderSwing: 0.8, rShoulderOut: 0.3, rShoulderTwist: 0.15, rElbow: 1.3, swordTilt: 0.9,
+      lShoulderSwing: 1.0, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.3 });
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => { // 打撃: 全身が伸びきる
+    bset(o, STANCE);
+    bset(o, { hipsYaw: 0.4, waistYaw: -0.5, hipsPitch: 0.06, waistPitch: 0.32, neckYaw: 0.5, neckPitch: 0.12, hipsX: 0.06, lHipSwing: 0.1, lKnee: 0.1, lHipOut: 1.05, rKnee: 0.35, rHipOut: 0.35, rFlat: 0.1,
+      rShoulderSwing: 1.5, rShoulderOut: 0.05, rShoulderTwist: 0.15, rElbow: 0.1, swordTilt: 1.6,
+      lShoulderSwing: 1.5, lShoulderOut: -0.4, lShoulderTwist: 0.7, lElbow: 0.2 });
+  } },
+  { t: 0.64, ease: 'out', pose: (o) => { // 大きく振り抜く: 体が後ろへ反り、バットが高く巻き上がる
+    bset(o, STANCE);
+    bset(o, { hipsYaw: 1.2, waistYaw: 0.55, hipsPitch: -0.04, waistPitch: 0.05, neckYaw: -0.5, neckPitch: -0.1, hipsX: 0.12, lHipSwing: 0.0, lKnee: 0.12, lHipOut: 1.0, rKnee: 0.5, rHipOut: 0.2, rFlat: 0.0,
+      rShoulderSwing: 1.6, rShoulderOut: -0.3, rShoulderTwist: 0.15, rElbow: 1.2, swordTilt: 0.5,
+      lShoulderSwing: 1.5, lShoulderOut: -0.35, lShoulderTwist: 0.7, lElbow: 1.3 });
+  } },
+  { t: 1, ease: 'out', pose: (o) => { // フィニッシュ: バットを肩にかついだまま、じっとボールの行方を見る
+    bset(o, STANCE);
+    bset(o, { hipsYaw: 1.0, waistYaw: 0.6, hipsPitch: 0.0, waistPitch: 0.0, neckYaw: -0.6, neckPitch: -0.2, hipsX: 0.12, lHipSwing: 0.0, lKnee: 0.15, lHipOut: 0.9, rKnee: 0.45, rHipOut: 0.2, rFlat: 0.2,
+      rShoulderSwing: 1.3, rShoulderOut: 0.0, rShoulderTwist: 0.15, rElbow: 1.7, swordTilt: 0.4,
+      lShoulderSwing: 1.2, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.7 });
+  } },
+];
+const attackBP = (ctx, o) => keyed(ctx.attackT, POWER, o);
+
+// ---- 素早いスイング（attackBQ。スキル3の連打）: 左手でボールを軽く上げ、小さく踏み込んで、コンパクトに振る。0.5 で打つ。1 → 0 でつながる ----
+const QREADY = (o) => { // 右手でバットを肩へ、左手にボール（体の前）
+  bset(o, STANCE);
+  bset(o, { hipsX: -0.14, rShoulderSwing: 0.75, rShoulderOut: 0.4, rShoulderTwist: 0.15, rElbow: 1.9, swordTilt: 1.2,
+    lShoulderSwing: 1.1, lShoulderOut: 0.2, lShoulderTwist: 0.3, lElbow: 0.7 });
+};
+const QUICK = [
+  { t: 0, pose: QREADY },
+  { t: 0.12, ease: 'out', pose: (o) => { // ボールを上へ放る
+    QREADY(o);
+    bset(o, { neckPitch: -0.3, waistPitch: 0.08, lShoulderSwing: 2.2, lShoulderOut: 0.1, lElbow: 0.25 });
+  } },
+  { t: 0.27, ease: 'out', pose: (o) => { // 左手を戻して握り、小さく踏み込む
+    bset(o, STANCE); handsBack(o, -0.15);
+    bset(o, { hipsX: -0.06, hipsYaw: -0.95, waistYaw: -0.7, lHipSwing: 0.4, lKnee: 0.7, lHipOut: 0.65, rKnee: 0.7 });
+  } },
+  { t: 0.42, ease: 'in', pose: (o) => {
+    bset(o, STANCE);
+    bset(o, { hipsYaw: -0.15, waistYaw: -0.6, neckYaw: 0.7, lKnee: 0.3, lHipOut: 0.85, rKnee: 0.5, rFlat: 0.5, waistPitch: 0.24,
+      rShoulderSwing: 0.95, rShoulderOut: 0.35, rShoulderTwist: 0.15, rElbow: 1.3, swordTilt: 1.2, lShoulderSwing: 1.1, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.3 });
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => SWING[4].pose(o) },
+  { t: 0.7, ease: 'out', pose: (o) => SWING[5].pose(o) },
+  { t: 1, ease: 'inout', pose: QREADY },
+];
+const attackBQ = (ctx, o) => keyed(ctx.attackT, QUICK, o);
+
+// ---- ボールを放り上げて打つ（attackB3）: 左手でボールを上げ、握り直して、標準のスイング。ボールを捉えるのは 0.59 ----
+const TOSS_HEAD = [
+  { t: 0, pose: (o) => { // 右手だけでバットをかまえ、左手にボール
+    bset(o, STANCE);
+    bset(o, { rShoulderSwing: 0.75, rShoulderOut: 0.4, rShoulderTwist: 0.15, rElbow: 1.9, swordTilt: 1.2, lShoulderSwing: 0.5, lShoulderOut: 0.3, lShoulderTwist: 0.2, lElbow: 1.0 });
+  } },
+  { t: 0.12, ease: 'out', pose: (o) => { // 左手でボールを高く放り上げる。体は伸び上がる
+    bset(o, STANCE);
+    bset(o, { hipsYaw: -0.6, waistYaw: -0.45, neckYaw: 0.5, neckPitch: -0.45, waistPitch: 0.0, lKnee: 0.3, rKnee: 0.35, lHipOut: 0.3, rHipOut: 0.3,
+      rShoulderSwing: 0.8, rShoulderOut: 0.4, rShoulderTwist: 0.15, rElbow: 1.9, swordTilt: 1.2, lShoulderSwing: 2.5, lShoulderOut: 0.1, lShoulderTwist: 0.2, lElbow: 0.3 });
+  } },
+  { t: 0.3, ease: 'inout', pose: (o) => { // 左手を戻して両手で握り直す。目はボールを追う
+    bset(o, STANCE); handsBack(o, -0.1);
+    bset(o, { neckPitch: -0.3, hipsX: -0.15, hipsYaw: -0.9, waistYaw: -0.55, lHipSwing: 0.9, lKnee: 1.2, lHipOut: 0.25, rKnee: 0.8 });
+  } },
+];
+// 標準のスイングの 0.3〜1 を、TOSS の 0.46〜1 へ割り当てる（打撃 0.5 → 0.59）
+const TOSS_KEYS = [
+  ...TOSS_HEAD,
+  ...SWING.filter((k) => k.t >= 0.3).map((k) => ({ ...k, t: 0.46 + (k.t - 0.3) / 0.7 * 0.54 })),
+];
+const attackB3 = (ctx, o) => keyed(ctx.attackT, TOSS_KEYS, o);
+
+// ---- 一回転して振り回す（attackB2）: 深く沈んで体をねじり（コイル）、腰から回り始めて、肩と腕が遅れて続く ----
 const TWO_PI_ = Math.PI * 2;
 function attackB2(ctx, o) {
   const t = ctx.attackT;
-  // 回転の進み具合: 0〜0.3 はため（少し逆へねじる）、0.3〜0.78 で1回転、そのあとは余韻
-  const wind = smooth(t / 0.3);
-  const spin = smooth((t - 0.3) / 0.48);
-  const ang = -0.95 * wind + (0.95 + TWO_PI_ + 0.25) * spin;     // -0.95 → 5.58
-  const settle = smooth((t - 0.78) / 0.22);
-  o.hipsYaw = 0.4 * ang;
-  o.waistYaw = 0.6 * ang;
-  o.neckYaw = -0.15 * ang * (1 - settle) - 0.4 * settle;           // 頭は少し遅れてついていく
-  o.waistPitch = 0.12 + 0.05 * sin(spin * PI);
-  o.hipsRoll = -0.1 * sin(spin * PI);
-  // 脚: 低く構えて、回る間は軽く踏ん張る
-  o.lHipSwing = 0.5; o.lKnee = 0.75 - 0.3 * spin; o.lHipOut = 0.2; o.lFlat = 1;
-  o.rHipSwing = -0.2; o.rKnee = 0.6 - 0.2 * spin; o.rHipOut = 0.22; o.rFlat = 0.85;
-  // 右腕: ためでは肩の後ろへ引き、回る間は水平にまっすぐ伸ばす
-  const ex = smooth((t - 0.18) / 0.14);
-  o.rShoulderSwing = 0.9 + 0.6 * ex; o.rShoulderOut = 0.5 * (1 - ex) + 0.1; o.rElbow = 1.8 * (1 - ex) + 0.12 * ex; o.swordTilt = 1.0 + 0.65 * ex;
-  o.lShoulderSwing = 0.5; o.lShoulderOut = 1.0 + 0.3 * spin; o.lElbow = 0.3;                 // 左腕は広げてバランス
+  const coil = smooth(t / 0.3);                                   // ためる（逆向きへねじりながら沈む）
+  const hipsSp = smooth((t - 0.28) / 0.46);                       // 腰が先に回る
+  const upperSp = smooth((t - 0.34) / 0.46);                      // 肩・腕は遅れて続く
+  const rec = smooth((t - 0.8) / 0.2);
+  const hips = -1.3 * coil + (1.3 + TWO_PI_ + 0.4) * hipsSp;      // -1.3 → 5.4
+  const upper = -0.8 * coil + (0.8 + TWO_PI_ + 0.1) * upperSp;    // 肩は少し遅れる
+  const ext = smooth((t - 0.16) / 0.2);                           // 腕がバットごと水平に伸びる
+  o.hipsYaw = 0.5 * hips * (1 - rec) + 0.5 * rec * 0.4;
+  o.waistYaw = (upper - hips * 0.5) * (1 - rec) + 0.4 * rec * 0.5;
+  o.neckYaw = -0.2 * sin(hipsSp * PI) - 0.2 * rec;
+  o.hipsPitch = 0.22 * coil * (1 - hipsSp) + 0.05;
+  o.waistPitch = 0.3 * coil * (1 - hipsSp) + 0.12;
+  o.hipsRoll = -0.12 * sin(hipsSp * PI);                          // 回る間、体を内側へ傾ける
+  o.waistRoll = -0.08 * sin(upperSp * PI);
+  o.hipsX = -0.12 * coil * (1 - hipsSp) + 0.05 * hipsSp;
+  // 脚: 深く沈んで、回りながら立ち上がる
+  o.lHipSwing = 0.3; o.lKnee = 0.5 + 0.5 * coil * (1 - hipsSp); o.lHipOut = 0.45 + 0.2 * coil; o.lFlat = 1;
+  o.rHipSwing = 0.0; o.rKnee = 0.55 + 0.5 * coil * (1 - hipsSp); o.rHipOut = 0.45 + 0.2 * coil; o.rFlat = 1 - 0.5 * sin(hipsSp * PI);
+  // 腕: ためでは構えのまま、そこから両腕を水平にまっすぐ伸ばす
+  o.rShoulderSwing = 0.75 + 0.78 * ext; o.rShoulderOut = 0.4 * (1 - ext) + 0.05; o.rShoulderTwist = 0.15;
+  o.rElbow = 1.9 * (1 - ext) + 0.1 * ext; o.swordTilt = 1.2 + 0.5 * ext;
+  o.lShoulderSwing = 1.0 + 0.55 * ext; o.lShoulderOut = -0.3 - 0.1 * ext; o.lShoulderTwist = 0.7; o.lElbow = 1.7 * (1 - ext) + 0.15 * ext;
+  // 振り終わり: バットを肩へ
+  o.rShoulderSwing -= 0.3 * rec; o.rElbow += 1.3 * rec; o.swordTilt -= 0.9 * rec;
+  o.lShoulderSwing -= 0.3 * rec; o.lElbow += 1.3 * rec;
 }
 
-// --- スキル: バットを金属化する構え（attackT 0〜1）: バットを顔の前に立てて、じっと見つめる ---
-const BMETAL = [
-  { t: 0, pose: (o) => {
-    o.waistPitch = 0.08; o.neckPitch = 0.0;
-    o.lHipSwing = 0.4; o.lKnee = 0.5; o.lHipOut = 0.16; o.lFlat = 1;
-    o.rHipSwing = -0.2; o.rKnee = 0.4; o.rHipOut = 0.18; o.rFlat = 1;
-    o.rShoulderSwing = 0.45; o.rShoulderOut = 0.4; o.rElbow = 1.95; o.swordTilt = 0.75;
-    o.lShoulderSwing = 0.2; o.lShoulderOut = 0.2; o.lElbow = 0.5;
+// ---- スキル1の最初: 予告ホームラン。バットを相手へまっすぐ向ける ----
+const CALL = [
+  { t: 0, pose: (o) => { bset(o, STANCE); handsBack(o); } },
+  { t: 0.4, ease: 'inout', pose: (o) => { // 体を相手へ向け、バットを真っすぐ突き出す。左手は腰
+    bset(o, STANCE);
+    bset(o, { hipsYaw: -0.35, waistYaw: -0.2, neckYaw: 0.4, hipsX: 0.0, waistPitch: 0.1, lKnee: 0.4, rKnee: 0.4, lHipOut: 0.4, rHipOut: 0.4,
+      rShoulderSwing: 1.55, rShoulderOut: 0.1, rShoulderTwist: 0.15, rElbow: 0.1, swordTilt: 1.65,
+      lShoulderSwing: -0.1, lShoulderOut: 0.55, lShoulderTwist: 0.2, lElbow: 1.7 });
   } },
-  { t: 0.5, ease: 'out', pose: (o) => { // バットを前に立てる
-    o.hipsYaw = -0.2; o.waistYaw = -0.3; o.neckYaw = 0.4; o.waistPitch = 0.0; o.neckPitch = -0.1;
-    o.lHipSwing = 0.5; o.lKnee = 0.6; o.lHipOut = 0.16; o.lFlat = 1;
-    o.rHipSwing = -0.3; o.rKnee = 0.5; o.rHipOut = 0.18; o.rFlat = 0.9;
-    o.rShoulderSwing = 1.5; o.rShoulderOut = 0.0; o.rShoulderTwist = 0.2; o.rElbow = 1.35; o.swordTilt = 1.35;
-    o.lShoulderSwing = 1.4; o.lShoulderOut = -0.35; o.lShoulderTwist = 0.5; o.lElbow = 1.2;
+  { t: 0.75, ease: 'inout', pose: (o) => { // そのまま、金属になったバットを突きつける（小さく震える）
+    bset(o, STANCE);
+    bset(o, { hipsYaw: -0.35, waistYaw: -0.2, neckYaw: 0.4, waistPitch: 0.1, lKnee: 0.4, rKnee: 0.4, lHipOut: 0.4, rHipOut: 0.4,
+      rShoulderSwing: 1.55, rShoulderOut: 0.1, rShoulderTwist: 0.15, rElbow: 0.1, swordTilt: 1.67,
+      lShoulderSwing: -0.1, lShoulderOut: 0.55, lShoulderTwist: 0.2, lElbow: 1.7 });
   } },
-  { t: 1, ease: 'inout', pose: (o) => { // 金属になったバットを、ぐっと握りしめる
-    o.hipsYaw = -0.3; o.waistYaw = -0.45; o.neckYaw = 0.6; o.waistPitch = 0.12; o.neckPitch = -0.08;
-    o.lHipSwing = 0.55; o.lKnee = 0.7; o.lHipOut = 0.16; o.lFlat = 1;
-    o.rHipSwing = -0.3; o.rKnee = 0.55; o.rHipOut = 0.18; o.rFlat = 0.9;
-    o.rShoulderSwing = 1.45; o.rShoulderOut = 0.05; o.rShoulderTwist = 0.2; o.rElbow = 1.5; o.swordTilt = 1.5;
-    o.lShoulderSwing = 1.4; o.lShoulderOut = -0.35; o.lShoulderTwist = 0.5; o.lElbow = 1.3;
+  { t: 1, ease: 'in', pose: (o) => { bset(o, STANCE); handsBack(o, -0.1); o.hipsX = -0.16; } }, // 構えに戻る（ため）
+];
+const batCall = (ctx, o) => {
+  keyed(ctx.attackT, CALL, o);
+  o.swordTilt += 0.03 * sin(ctx.time * 60) * (ctx.attackT > 0.4 ? 1 : 0);
+};
+
+// ---- 投球フォーム（batPitch）: バットを投げつけるときの全身。0.6 でリリース ----
+//   構え → 脚上げ（片脚立ちでバランス）→ 踏み込みと同時に両手を割る → 腕を引いてためる（コッキング）→ 腰が回り、腕が振られて加速 → リリース → 体が前へ倒れて、後ろ足が前へ
+const PITCH = [
+  { t: 0, pose: (o) => { // セットポジション: 両手を胸の前に
+    bset(o, { hipsYaw: -0.5, waistYaw: -0.3, neckYaw: 0.8, waistPitch: 0.1, lKnee: 0.25, rKnee: 0.25, lHipOut: 0.2, rHipOut: 0.2, lFlat: 1, rFlat: 1,
+      rShoulderSwing: 1.0, rShoulderOut: 0.1, rShoulderTwist: 0.15, rElbow: 1.9, swordTilt: 1.0,
+      lShoulderSwing: 1.0, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.9 });
+  } },
+  { t: 0.22, ease: 'inout', pose: (o) => { // 脚上げ: 左ひざを胸まで上げ、軸足で立つ。体は横向き
+    bset(o, { hipsYaw: -1.0, waistYaw: -0.5, neckYaw: 1.3, hipsPitch: -0.04, waistPitch: 0.06, hipsX: -0.06, lHipSwing: 1.55, lKnee: 1.7, lHipOut: 0.1, rKnee: 0.25, rHipOut: 0.15, rFlat: 1,
+      rShoulderSwing: 1.1, rShoulderOut: 0.1, rShoulderTwist: 0.15, rElbow: 1.9, swordTilt: 1.0,
+      lShoulderSwing: 1.1, lShoulderOut: -0.3, lShoulderTwist: 0.7, lElbow: 1.9 });
+  } },
+  { t: 0.4, ease: 'in', pose: (o) => { // 踏み込み: 左足が大きく前へ。両手が離れ、左腕は相手へ、右腕は後ろへ
+    bset(o, { hipsYaw: -1.1, waistYaw: -0.6, neckYaw: 1.4, hipsPitch: 0.08, waistPitch: 0.05, hipsX: -0.02, lHipSwing: 0.3, lKnee: 0.3, lHipOut: 1.0, rKnee: 0.45, rHipOut: 0.3, rFlat: 1,
+      rShoulderSwing: -0.2, rShoulderOut: 1.0, rShoulderTwist: 0.15, rElbow: 0.5, swordTilt: 1.2,
+      lShoulderSwing: 0.2, lShoulderOut: 1.45, lShoulderTwist: 0.3, lElbow: 0.1 });
+  } },
+  { t: 0.5, ease: 'out', pose: (o) => { // コッキング: 肘を肩の高さに、手は頭の後ろへ。胸が反る
+    bset(o, { hipsYaw: -0.6, waistYaw: -0.85, neckYaw: 1.0, hipsPitch: 0.04, waistPitch: -0.22, hipsX: 0.0, lHipSwing: 0.2, lKnee: 0.25, lHipOut: 1.0, rKnee: 0.45, rHipOut: 0.3, rFlat: 0.8,
+      rShoulderSwing: 0.1, rShoulderOut: 1.5, rShoulderTwist: 0.15, rElbow: 1.7, swordTilt: 0.9,
+      lShoulderSwing: 0.3, lShoulderOut: 1.3, lShoulderTwist: 0.3, lElbow: 0.3 });
+  } },
+  { t: 0.6, ease: 'in', pose: (o) => { // 加速→リリース: 腰が開き、胸が相手へ。右腕が頭の上から前へ振り抜かれる
+    bset(o, { hipsYaw: 0.1, waistYaw: -0.25, neckYaw: 0.2, hipsPitch: 0.04, waistPitch: 0.5, hipsX: 0.05, lHipSwing: 0.1, lKnee: 0.15, lHipOut: 1.0, rHipSwing: 0.5, rKnee: 0.6, rHipOut: 0.3, rFlat: 0.2,
+      rShoulderSwing: 2.5, rShoulderOut: 0.5, rShoulderTwist: 0.15, rElbow: 0.2, swordTilt: 1.45,
+      lShoulderSwing: 0.7, lShoulderOut: 0.5, lShoulderTwist: 0.3, lElbow: 1.5 });
+  } },
+  { t: 0.76, ease: 'out', pose: (o) => { // フォロースルー: 上体が深く前へ倒れ、右腕は体の左へ巻き込む。後ろ足が前へ振り出される
+    bset(o, { hipsYaw: 0.5, waistYaw: 0.4, neckYaw: -0.3, hipsPitch: 0.2, waistPitch: 0.6, hipsX: 0.08, lHipSwing: 0.2, lKnee: 0.3, lHipOut: 0.9, rHipSwing: 1.0, rKnee: 0.9, rHipOut: 0.2, rFlat: 0,
+      rShoulderSwing: 1.2, rShoulderOut: -0.5, rShoulderTwist: 0.15, rElbow: 0.6, swordTilt: 1.2,
+      lShoulderSwing: 0.4, lShoulderOut: 0.7, lShoulderTwist: 0.3, lElbow: 1.0 });
+  } },
+  { t: 1, ease: 'inout', pose: (o) => { // 守備の構え: 膝を曲げ、上体を前へ
+    bset(o, { hipsYaw: 0.2, waistYaw: 0.15, neckYaw: 0.0, hipsPitch: 0.2, waistPitch: 0.5, lHipSwing: 0.5, lKnee: 0.8, lHipOut: 0.45, rHipSwing: 0.4, rKnee: 0.8, rHipOut: 0.45,
+      rShoulderSwing: 0.5, rShoulderOut: 0.3, rElbow: 0.6, swordTilt: 1.0, lShoulderSwing: 0.5, lShoulderOut: 0.3, lElbow: 0.6 });
   } },
 ];
-const batMetal = (ctx, o) => keyed(ctx.attackT, BMETAL, o);
+const batPitch = (ctx, o) => keyed(ctx.attackT, PITCH, o);
+// 左腕で投げる版（必殺技の鉄球）
+const batPitchL = (ctx, o) => {
+  keyed(ctx.attackT, PITCH, o);
+  mirrorPose(o);
+  // バットは右肩にかついだまま（右腕は、バランスをとる程度に少しだけ動く）
+  const sway = 0.15 * sin(ctx.attackT * PI);
+  bset(o, { rShoulderSwing: 0.45 + sway, rShoulderOut: 0.4 + sway, rShoulderTwist: 0.1, rElbow: 1.95, swordTilt: 0.75, swordTwist: 0, swordRoll: 0 });
+};
 
-// --- スキル4: バットを真上へ放り投げる（attackT 0〜1。0.55 で手を離す）---
+// ---- 必殺技: 鉄球を懐から取り出す（左手がジャケットの中へ → 引き抜いて、ボールをにぎる）----
+const BALLDRAW = [
+  { t: 0, pose: (o) => { bset(o, { hipsYaw: -0.3, waistYaw: -0.2, neckYaw: 0.5, waistPitch: 0.1, lKnee: 0.3, rKnee: 0.3, lHipOut: 0.3, rHipOut: 0.3,
+    rShoulderSwing: 0.45, rShoulderOut: 0.4, rElbow: 1.95, swordTilt: 0.75, lShoulderSwing: 0.2, lShoulderOut: 0.3, lElbow: 0.5 }); } },
+  { t: 0.35, ease: 'out', pose: (o) => { // 上体を少し沈めて、左手を右の胸（懐）へ深く差し入れる
+    bset(o, { hipsYaw: -0.5, waistYaw: -0.45, neckYaw: 0.8, waistPitch: 0.4, hipsPitch: 0.1, neckPitch: 0.35, lKnee: 0.55, rKnee: 0.55, lHipOut: 0.4, rHipOut: 0.4, hipsX: -0.08,
+      rShoulderSwing: 0.45, rShoulderOut: 0.4, rElbow: 1.95, swordTilt: 0.75, lShoulderSwing: 1.1, lShoulderOut: -1.05, lShoulderTwist: 0.8, lElbow: 2.4 });
+  } },
+  { t: 0.7, ease: 'in', pose: (o) => { // 一気に引き抜いて、胸を開き、ボールを前へ突き出す
+    bset(o, { hipsYaw: -0.1, waistYaw: -0.05, neckYaw: 0.2, waistPitch: -0.1, hipsPitch: 0.0, neckPitch: -0.1, lKnee: 0.35, rKnee: 0.35, lHipOut: 0.35, rHipOut: 0.35, hipsX: 0.04,
+      rShoulderSwing: 0.45, rShoulderOut: 0.4, rElbow: 1.95, swordTilt: 0.75, lShoulderSwing: 1.6, lShoulderOut: 0.2, lShoulderTwist: 0.2, lElbow: 0.9 });
+  } },
+  { t: 1, ease: 'out', pose: (o) => { // ボールを握りしめて、投球の構え（体を横へ向ける）
+    bset(o, { hipsYaw: -0.5, waistYaw: -0.3, neckYaw: 0.8, waistPitch: 0.1, lKnee: 0.3, rKnee: 0.3, lHipOut: 0.2, rHipOut: 0.2,
+      rShoulderSwing: 0.45, rShoulderOut: 0.4, rElbow: 1.95, swordTilt: 0.75, lShoulderSwing: 1.1, lShoulderOut: -0.1, lShoulderTwist: 0.3, lElbow: 1.7 });
+  } },
+];
+const batBallDraw = (ctx, o) => keyed(ctx.attackT, BALLDRAW, o);
+
+// ---- スキル2の最後の一撃: 大きく振りかぶる右のパンチ（腰の回転で打つ）。0.55 で当たる ----
+const HAYMAKER = [
+  { t: 0, pose: (o) => { // 構え（ボクシングのガード）
+    bset(o, { hipsYaw: -0.4, waistYaw: -0.2, neckYaw: 0.5, waistPitch: 0.15, lHipSwing: 0.5, lKnee: 0.5, lHipOut: 0.3, rHipSwing: -0.25, rKnee: 0.4, rHipOut: 0.3,
+      rShoulderSwing: 0.9, rShoulderOut: 0.2, rShoulderTwist: 0.6, rElbow: 2.0, lShoulderSwing: 1.1, lShoulderOut: 0.1, lShoulderTwist: 0.5, lElbow: 1.9 });
+  } },
+  { t: 0.35, ease: 'inout', pose: (o) => { // 体重を後ろへ。体をひねって右拳を大きく引く
+    bset(o, { hipsYaw: -1.0, waistYaw: -0.55, neckYaw: 1.2, hipsPitch: 0.1, waistPitch: 0.25, hipsX: -0.14, lHipSwing: 0.6, lKnee: 0.7, lHipOut: 0.4, rHipSwing: -0.1, rKnee: 0.75, rHipOut: 0.35,
+      rShoulderSwing: -0.3, rShoulderOut: 0.9, rShoulderTwist: 0.3, rElbow: 1.3, lShoulderSwing: 1.4, lShoulderOut: 0.1, lShoulderTwist: 0.5, lElbow: 1.0 });
+  } },
+  { t: 0.55, ease: 'in', pose: (o) => { // 腰の回転から、拳が真っすぐ伸びる。後ろ足はつま先立ち
+    bset(o, { hipsYaw: 0.35, waistYaw: 0.2, neckYaw: -0.2, hipsPitch: 0.08, waistPitch: 0.3, hipsX: 0.05, lHipSwing: 0.4, lKnee: 0.25, lHipOut: 0.5, rHipSwing: 0.1, rKnee: 0.45, rHipOut: 0.3, rFlat: 0.1,
+      rShoulderSwing: 1.55, rShoulderOut: -0.05, rShoulderTwist: 0.2, rElbow: 0.08, lShoulderSwing: 0.9, lShoulderOut: 0.3, lShoulderTwist: 0.5, lElbow: 1.7 });
+  } },
+  { t: 1, ease: 'out', pose: (o) => { // 振り抜いた余韻
+    bset(o, { hipsYaw: 0.6, waistYaw: 0.35, neckYaw: -0.3, hipsPitch: 0.1, waistPitch: 0.3, hipsX: 0.08, lHipSwing: 0.4, lKnee: 0.3, lHipOut: 0.5, rHipSwing: 0.2, rKnee: 0.5, rHipOut: 0.3,
+      rShoulderSwing: 1.3, rShoulderOut: -0.2, rShoulderTwist: 0.2, rElbow: 0.4, lShoulderSwing: 0.8, lShoulderOut: 0.3, lShoulderTwist: 0.5, lElbow: 1.6 });
+  } },
+];
+const batHaymaker = (ctx, o) => keyed(ctx.attackT, HAYMAKER, o);
+
+// ---- 戻ってきたバットを片手でキャッチ（attackT 0〜1）----
+const batCatch = (ctx, o) => {
+  const t = smooth(ctx.attackT);
+  bset(o, { hipsYaw: -0.2 * t, waistYaw: -0.15 * t, neckYaw: 0.3 * t, waistPitch: 0.12, lHipSwing: 0.3, lKnee: 0.45 + 0.1 * t, lHipOut: 0.35, rHipSwing: -0.1, rKnee: 0.45, rHipOut: 0.35,
+    rShoulderSwing: 0.8 + 0.9 * t, rShoulderOut: 0.35, rShoulderTwist: 0.15, rElbow: 0.9 - 0.5 * t, swordTilt: 1.0,
+    lShoulderSwing: 0.2, lShoulderOut: 0.7 * t + 0.3, lElbow: 0.6 });
+};
+
+// ---- スキル4: バットを空中へ放る（バットフリップ）。0.55 で手を離す ----
 const BTOSS = [
-  { t: 0, pose: (o) => {
-    o.waistPitch = 0.05;
-    o.lHipSwing = 0.4; o.lKnee = 0.55; o.lHipOut = 0.16; o.lFlat = 1;
-    o.rHipSwing = -0.25; o.rKnee = 0.5; o.rHipOut = 0.18; o.rFlat = 1;
-    o.rShoulderSwing = 0.45; o.rShoulderOut = 0.4; o.rElbow = 1.95; o.swordTilt = 0.75;
-    o.lShoulderSwing = 0.3; o.lShoulderOut = 0.3; o.lElbow = 0.6;
+  { t: 0, pose: (o) => { bset(o, STANCE); bset(o, { rShoulderSwing: 0.45, rShoulderOut: 0.4, rElbow: 1.95, swordTilt: 0.75, lShoulderSwing: 0.2, lShoulderOut: 0.3, lElbow: 0.6, hipsYaw: -0.4, waistYaw: -0.3 }); } },
+  { t: 0.3, ease: 'out', pose: (o) => { // 沈み込んで、バットを下へ引く（反動）
+    bset(o, { hipsYaw: -0.6, waistYaw: -0.4, neckYaw: 0.8, hipsPitch: 0.18, waistPitch: 0.3, hipsX: -0.1, lHipSwing: 0.8, lKnee: 1.0, lHipOut: 0.35, rHipSwing: 0.2, rKnee: 1.0, rHipOut: 0.35,
+      rShoulderSwing: -0.1, rShoulderOut: 0.35, rElbow: 0.5, swordTilt: 0.9, lShoulderSwing: 0.5, lShoulderOut: 0.5, lElbow: 0.5 });
   } },
-  { t: 0.3, ease: 'out', pose: (o) => { // 沈み込んで、腕を下へ引く
-    o.waistPitch = 0.25; o.hipsPitch = 0.1;
-    o.lHipSwing = 0.8; o.lKnee = 1.0; o.lHipOut = 0.16; o.lFlat = 1;
-    o.rHipSwing = 0.2; o.rKnee = 1.0; o.rHipOut = 0.18; o.rFlat = 1;
-    o.rShoulderSwing = 0.1; o.rShoulderOut = 0.35; o.rElbow = 0.6; o.swordTilt = 1.0;
-    o.lShoulderSwing = 0.2; o.lShoulderOut = 0.4; o.lElbow = 0.6;
+  { t: 0.55, ease: 'in', pose: (o) => { // 跳び上がりながら、右腕を振り上げてバットを放す
+    bset(o, { hipsYaw: 0.1, waistYaw: 0.2, neckYaw: -0.1, neckPitch: -0.4, hipsPitch: -0.04, waistPitch: -0.25, lift: 0.5, lHipSwing: 0.6, lKnee: 1.2, lHipOut: 0.2, lAnkle: -0.4, rHipSwing: 0.0, rKnee: 0.5, rHipOut: 0.2, rAnkle: -0.5,
+      rShoulderSwing: 2.9, rShoulderOut: 0.15, rElbow: 0.1, swordTilt: 1.5, lShoulderSwing: 0.5, lShoulderOut: 0.9, lElbow: 0.3 });
   } },
-  { t: 0.55, ease: 'in', pose: (o) => { // 伸び上がって、真上へ放る
-    o.waistPitch = -0.3; o.neckPitch = 0.35; o.lift = 0.3;
-    o.lHipSwing = 0.1; o.lKnee = 0.15; o.lHipOut = 0.12; o.lAnkle = -0.5;
-    o.rHipSwing = -0.05; o.rKnee = 0.15; o.rHipOut = 0.12; o.rAnkle = -0.5;
-    o.rShoulderSwing = 2.9; o.rShoulderOut = 0.15; o.rElbow = 0.1; o.swordTilt = 1.5;
-    o.lShoulderSwing = 0.5; o.lShoulderOut = 0.7; o.lElbow = 0.4;
-  } },
-  { t: 1, ease: 'out', pose: (o) => {
-    o.waistPitch = -0.15; o.neckPitch = 0.4;
-    o.lHipSwing = 0.3; o.lKnee = 0.4; o.lHipOut = 0.12; o.lFlat = 1;
-    o.rHipSwing = -0.1; o.rKnee = 0.3; o.rHipOut = 0.12; o.rFlat = 1;
-    o.rShoulderSwing = 2.6; o.rShoulderOut = 0.2; o.rElbow = 0.3; o.swordTilt = 1.5;
-    o.lShoulderSwing = 0.5; o.lShoulderOut = 0.7; o.lElbow = 0.4;
+  { t: 1, ease: 'out', pose: (o) => { // 着地して、空を見上げる（バットを目で追う）
+    bset(o, { hipsYaw: 0.0, waistYaw: 0.1, neckPitch: -0.55, waistPitch: -0.12, lHipSwing: 0.3, lKnee: 0.5, lHipOut: 0.3, rHipSwing: 0.0, rKnee: 0.45, rHipOut: 0.3,
+      rShoulderSwing: 2.7, rShoulderOut: 0.2, rElbow: 0.3, swordTilt: 1.5, lShoulderSwing: 0.3, lShoulderOut: 0.8, lElbow: 0.4 });
   } },
 ];
 const batToss = (ctx, o) => keyed(ctx.attackT, BTOSS, o);
 
+// ---- スキル4: 空中のバットへ跳び上がる（右腕を高く伸ばす）----
+function batLeap(ctx, o) {
+  o.ground = 0;
+  bset(o, { hipsYaw: -0.1, waistYaw: -0.1, neckPitch: -0.45, waistPitch: -0.3, hipsPitch: -0.05,
+    lHipSwing: 0.9, lKnee: 1.4, lHipOut: 0.2, lAnkle: -0.3, rHipSwing: 0.2, rKnee: 1.5, rHipOut: 0.2, rAnkle: -0.3,
+    rShoulderSwing: 3.05, rShoulderOut: 0.1, rShoulderTwist: 0.15, rElbow: 0.08, swordTilt: 1.5,
+    lShoulderSwing: -0.2, lShoulderOut: 0.9, lElbow: 0.4 });
+}
+
+// ---- スキル4: つかんだバットを、全身で叩きつける（attackT 0〜1。両手・頭上から真下へ）----
+const SMASH = [
+  { t: 0, pose: (o) => { o.ground = 0; bset(o, { waistPitch: -0.3, neckPitch: 0.3, lHipSwing: 0.7, lKnee: 1.3, rHipSwing: 0.2, rKnee: 1.3, lHipOut: 0.2, rHipOut: 0.2 }); twoHand(o, 3.0, 0.6, 1.4, 0.35); } },
+  { t: 0.5, ease: 'in', pose: (o) => { o.ground = 0; bset(o, { waistPitch: 0.3, hipsPitch: 0.1, neckPitch: 0.1, lHipSwing: 0.5, lKnee: 0.9, rHipSwing: 0.4, rKnee: 1.0, lHipOut: 0.2, rHipOut: 0.2 }); twoHand(o, 2.0, 0.6, -0.5, 0.35); } },
+  { t: 1, ease: 'in', pose: (o) => { o.ground = 0; bset(o, { waistPitch: 0.75, hipsPitch: 0.2, neckPitch: -0.2, lHipSwing: 0.8, lKnee: 1.1, rHipSwing: 0.6, rKnee: 1.2, lHipOut: 0.25, rHipOut: 0.25 }); twoHand(o, 1.3, 0.4, -1.45, 0.35); } },
+];
+const batSmash = (ctx, o) => keyed(ctx.attackT, SMASH, o);
+
 export const POSES = {
-  attackB2, attackB3, batMetal, batToss,
+  attackB1, attackB2, attackB3, attackBP, attackBQ, batCall, batPitch, batPitchL, batBallDraw, batHaymaker, batCatch, batToss, batLeap, batSmash,
   ultDraw, ultThrow, ultSummon, ultWindup, ultDash, ultFinish, ultLeap, ultLand,
   stunned, lungeAim, lungeDash, lungeStrike,
   chargeStance,

@@ -12,42 +12,42 @@ import { RIG } from './rig.js';
 //   active  : 当たる区間（ボールの3段目は近接判定なし。この区間の頭でボールが飛ぶ）
 //   ranged  : true なら、近接の当たり判定を使わず、ボールを飛ばす
 export const BAT_ATTACKS = [
-  { anim: 'attack2', duration: 0.46, active: [0.34, 0.62], chain: 0.72, lunge: [0.26, 0.5, 8], power: 1 },
-  { anim: 'attackB2', duration: 0.66, active: [0.34, 0.78], chain: 0.84, lunge: [0.2, 0.6, 7], power: 1 },
-  { anim: 'attackB3', duration: 0.7, active: [0.5, 0.56], chain: 0.88, lunge: [0, 0, 0], power: 2, ranged: true, tossAt: 0.16 },
+  { anim: 'attackB1', duration: 0.58, active: [0.44, 0.68], chain: 0.8, lunge: [0.3, 0.5, 8], power: 1 },
+  { anim: 'attackB2', duration: 0.74, active: [0.38, 0.8], chain: 0.88, lunge: [0.25, 0.6, 7], power: 1 },
+  { anim: 'attackB3', duration: 0.84, active: [0.58, 0.64], chain: 0.92, lunge: [0, 0, 0], power: 2, ranged: true, tossAt: 0.12 },
 ];
 
 // スキル1: バットを金属化して打つ強いボール → バットは木に戻る
 export const BSKILL1 = {
   cooldown: 6,
-  metal: 0.6,       // 金属になるまで（構えの時間）
-  swing: 0.62,      // ボールを放り上げて打つまで
+  metal: 0.6,       // 金属になるまで（予告ホームランの構え）
+  swing: 0.84,      // ボールを放り上げて打つまで（attackB3 の動きを一通り）
   revert: 0.5,      // 木に戻る時間
   range: 220,
 };
 // スキル3: ボールを何度も打つ（スキル1を使ったあと、同じボタンが変わる）
 export const BSKILL3 = {
   shots: 5,         // 打つ回数
-  interval: 0.3,    // 1発ごとの間隔
+  interval: 0.44,   // 1発ごとの間隔
   range: 220,
 };
 // スキル2: バットを近くの敵へ投げつけ、ダッシュして殴りながら吹き飛ばす
 export const BSKILL2 = {
   cooldown: 8,
   range: 55,        // 「近くの敵」: この距離以内
-  aim: 0.3,         // 投げる動作の長さ
-  release: 0.5,     // そのうち、手を離す瞬間
+  aim: 0.55,        // 投球フォームの長さ（脚上げ→踏み込み→腕を振る）
+  release: 0.6,     // そのうち、手を離す瞬間
   flight: 0.2,      // バットが届くまで
   dash: 0.1,        // 敵へダッシュする時間
   holdDist: 2.6,    // 殴る間隔
   punches: 7,       // パンチの回数（最後の1発で吹き飛ばす）
   punchRate: 3.8,   // 毎秒の往復
-  finish: 0.4,      // 最後の一撃の動作
+  finish: 0.6,      // 最後の一撃（大振りのパンチ）の動作
   launchSpeed: 70, launchUp: 15,
 };
 // スキル4: バットを空中で回転させ、敵にパンチし、バットを回収して攻撃（スキル2を使ったあと、同じボタンが変わる）
 export const BSKILL4 = {
-  toss: 0.3,        // 投げ上げる動作
+  toss: 0.5,        // 投げ上げる動作（沈み込み→跳びながら放る）
   fly: 0.4,         // バットが敵の頭上へ飛ぶ
   height: 11,       // 空中で回るバットの高さ
   dash: 0.1,
@@ -65,7 +65,7 @@ export const BSKILL4 = {
 export const ULTB = {
   range: 220,          // 鉄球が届く距離（リグ単位）
   draw: 0.6,           // 懐から鉄球を取り出す
-  throwTime: 0.3, release: 0.5, flight: 0.24,
+  throwTime: 0.55, release: 0.6, flight: 0.24, // 投球フォーム（脚上げ→踏み込み→腕を振る）。0.6 で離す
   freeze: 0.34,        // 命中して、画面が切り替わるまで
   // ムービー（ゲーム内の秒数）
   tIntro: 1.9,         // 導入（舞台の紹介・技名）
@@ -219,7 +219,7 @@ export class BatController extends CharacterController {
   // ============================================================
   beginSkill1() {
     this.bs.phase = 'metal';
-    this.c.animator.play('batMetal', 0.12);
+    this.c.animator.play('batCall', 0.12);
     this.events.push({ type: 'batSkill1Start' });
     this.events.push({ type: 'batMetalOn' });
   }
@@ -239,10 +239,10 @@ export class BatController extends CharacterController {
     } else if (b.phase === 'swing') {
       // 放り上げて、打つ（3段目の動きを使う。ためなしで一気に）
       const f = Math.min(1, b.t / K.swing);
-      animator.attackT = f * 0.85;
-      animator.trailOn = animator.attackT > 0.4 && animator.attackT < 0.72;
-      if (!b.tossed && animator.attackT >= 0.16) { b.tossed = true; this.events.push({ type: 'batToss', time: (0.5 - 0.16) * K.swing / 0.85, metal: true }); }
-      if (!b.fired && animator.attackT >= 0.5) { b.fired = true; this.events.push({ type: 'batBall', kind: 'metal', power: 3 }); }
+      animator.attackT = f * 0.92;
+      animator.trailOn = animator.attackT > 0.5 && animator.attackT < 0.72;
+      if (!b.tossed && animator.attackT >= 0.12) { b.tossed = true; this.events.push({ type: 'batToss', time: (0.59 - 0.12) * K.swing / 0.92, metal: true }); }
+      if (!b.fired && animator.attackT >= 0.59) { b.fired = true; this.events.push({ type: 'batBall', kind: 'metal', power: 3 }); }
       if (f >= 1) { b.phase = 'revert'; b.t = 0; animator.trailOn = false; this.events.push({ type: 'batRevert' }); animator.play('fight', 0.2); }
     } else {
       const f = Math.min(1, b.t / K.revert);
@@ -258,7 +258,7 @@ export class BatController extends CharacterController {
     this.bs.phase = 'shots';
     this.bs.shot = 0;
     this.bs.t = 0;
-    this.c.animator.play('attackB3', 0.08);
+    this.c.animator.play('attackBQ', 0.08);
     this.events.push({ type: 'batSkill3Start' });
   }
 
@@ -268,11 +268,11 @@ export class BatController extends CharacterController {
     const b = this.bs;
     b.t += dt;
     group.rotation.y += angleDiff(this.aimAtFoe(K.range), group.rotation.y) * (1 - Math.exp(-16 * dt));
-    // 1発ごとに、放り上げ(0.16) → 打つ(0.5) → 振り抜き(0.72) を interval 秒で回す
+    // 1発ごとに、放り上げ(0.06) → 打つ(0.5) → 構えへ戻る(1) を interval 秒で回す
     const f = Math.min(1, b.t / K.interval);
-    animator.attackT = 0.12 + f * 0.6;
-    animator.trailOn = animator.attackT > 0.4 && animator.attackT < 0.7;
-    if (!b.tossed && animator.attackT >= 0.16) { b.tossed = true; this.events.push({ type: 'batToss', time: (0.5 - 0.16) * K.interval / 0.6, quick: true }); }
+    animator.attackT = f;
+    animator.trailOn = f > 0.42 && f < 0.7;
+    if (!b.tossed && f >= 0.06) { b.tossed = true; this.events.push({ type: 'batToss', time: (0.5 - 0.06) * K.interval, quick: true }); }
     if (!b.fired && animator.attackT >= 0.5) { b.fired = true; this.events.push({ type: 'batBall', kind: 'normal', power: 1, skill3: true, shot: b.shot }); }
     if (f >= 1) {
       b.shot++;
@@ -306,7 +306,7 @@ export class BatController extends CharacterController {
     animator.trailOn = false;
     animator.leanTarget = animator.bankTarget = 0;
     animator.attackT = 0;
-    animator.play('ultDraw', 0.1);
+    animator.play('batBallDraw', 0.1);
     this.events.push({ type: 'ultStart' });
   }
 
@@ -325,7 +325,7 @@ export class BatController extends CharacterController {
     if (u.phase === 'draw') {
       animator.attackT = Math.min(1, u.t / K.draw);
       if (!u.shown && animator.attackT >= 0.3) { u.shown = true; this.iron.visible = true; this.events.push({ type: 'ultBallDraw' }); }
-      if (u.t >= K.draw) { u.phase = 'throw'; u.t = 0; animator.attackT = 0; animator.play('ultThrow', 0.08); }
+      if (u.t >= K.draw) { u.phase = 'throw'; u.t = 0; animator.attackT = 0; animator.play('batPitchL', 0.08); }
     } else if (u.phase === 'throw') {
       const f = Math.min(1, u.t / K.throwTime);
       animator.attackT = f;
@@ -422,9 +422,9 @@ export class BatController extends CharacterController {
       if (T >= a && T <= b) {
         swinging = true;
         const f = (T - a) / (b - a);
-        animator.attackT = 0.25 + 0.55 * f;
+        animator.attackT = 0.22 + 0.63 * f;
         animator.trailOn = f > 0.2 && f < 0.7;
-        animator.play(k % 2 ? 'attackB3' : 'attack2', 0.04);
+        animator.play(k % 2 ? 'attackBP' : 'attackB1', 0.04);
         break;
       }
     }
@@ -595,7 +595,7 @@ export class BatController extends CharacterController {
     b.dir = new THREE.Vector3(Math.sin(g.rotation.y), 0, Math.cos(g.rotation.y));
     b.released = false;
     this.c.animator.attackT = 0;
-    this.c.animator.play('throwSword', 0.1);
+    this.c.animator.play('batPitch', 0.1);
     this.events.push({ type: 'batSkill2Start' });
   }
 
@@ -617,6 +617,7 @@ export class BatController extends CharacterController {
       group.rotation.y += angleDiff(Math.atan2(dx, dz), group.rotation.y) * (1 - Math.exp(-16 * dt));
     }
 
+    if (b.phase === 'recall') animator.attackT = Math.min(1, b.t / 0.4);
     if (b.phase === 'throw') {
       animator.attackT = Math.min(1, b.t / K.aim);
       if (!b.released && animator.attackT >= K.release) {
@@ -648,12 +649,14 @@ export class BatController extends CharacterController {
       if (this.punchTick(dt, b, K, 'batPunch')) {
         b.phase = 'finish'; b.t = 0;
         animator.attackT = 0;
-        animator.play('lungeStrike', 0.06);
+        b.fired = false;
+        animator.play('batHaymaker', 0.08);
       }
     } else if (b.phase === 'finish') {
       this.holdFoe(b.dir, K.holdDist, 0);
-      animator.attackT = 0;
-      if (b.t >= K.finish * 0.35 && !b.fired) {
+      animator.attackT = Math.min(1, b.t / K.finish);
+      animator.trailOn = animator.attackT > 0.35 && animator.attackT < 0.75;
+      if (animator.attackT >= 0.55 && !b.fired) {
         // 最後の一撃: 相手を遠くへ吹き飛ばす
         b.fired = true;
         v.launch(b.dir.x, b.dir.z, K.launchSpeed, K.launchUp);
@@ -662,7 +665,9 @@ export class BatController extends CharacterController {
       if (b.t >= K.finish) {
         // バットを呼び戻す
         b.phase = 'recall'; b.t = 0;
-        animator.play('stand', 0.2);
+        animator.trailOn = false;
+        animator.attackT = 0;
+        animator.play('batCatch', 0.15);
         this.batRecall(0.4, () => this.endBatSkill());
         this.events.push({ type: 'batRecall' });
       }
@@ -771,7 +776,7 @@ export class BatController extends CharacterController {
         b.phase = 'leap'; b.t = 0;
         b.from = group.position.clone();
         animator.attackT = 0;
-        animator.play('ultLeap', 0.06);
+        animator.play('batLeap', 0.06);
         this.events.push({ type: 'batSkill4Leap' });
       }
     } else if (b.phase === 'leap') {
@@ -787,13 +792,13 @@ export class BatController extends CharacterController {
         b.phase = 'smash'; b.t = 0;
         b.top = group.position.clone();
         animator.attackT = 0;
-        animator.play('airSlam', 0.05);
+        animator.play('batSmash', 0.05);
         this.events.push({ type: 'batSkill4Catch' });
       }
     } else if (b.phase === 'smash') {
       const f = Math.min(1, b.t / K.smash);
       group.position.y = b.top.y * (1 - f * f);
-      animator.attackT = Math.min(1, 0.3 + f * 0.7);
+      animator.attackT = Math.min(1, f);
       animator.trailOn = true;
       this.holdFoe(b.dir, K.holdDist, 0);
       if (f >= 1) {

@@ -646,14 +646,64 @@ function distToSegmentXZ(px, pz, a, b) {
   return Math.hypot(px - (a.x + abx * t), pz - (a.z + abz * t));
 }
 
+// ---- バットの風 ----
+// バットを振ると、振りの強さ（バットの先の速さ）に応じた風が起こり、当たる範囲が広がる。
+// 弱い振りで約 1.6 倍、いっぱいの振りで約 2.4 倍（平均しておよそ 2 倍）。
+const WIND_EXTEND = 7;      // 風が刃を押し広げる長さ（リグ単位。振りの強さで 0.5〜1.5 倍）
+const rawPrevTip = new THREE.Vector3();
+const WIND_REF = 45;        // この速さ（身長あたり/秒）で最大の強さ
+let windStrength = 0;       // 今の振りの強さ 0〜1
+let windPeak = 0;           // この振りでの最大
+let windGust = 0;           // 風を出すまでの間隔
+let frameDt = 1 / 60;
+const windPos = new THREE.Vector3();
+const _wd = new THREE.Vector3();
+
+function windRadiusScale() {
+  return 1.6 + 0.8 * windStrength;
+}
+
+function spawnWind(dir, strong) {
+  const h = Math.atan2(dir.x, dir.z);
+  const k = 0.55 + 0.9 * windStrength;
+  windPos.copy(bladeTip).lerp(bladeBase, 0.35);
+  impact.wave(windPos, h, 0, p1.height * 1.5 * k, p1.height * (5 + 7 * windStrength), 0.32, 'wind');
+  if (strong) impact.wave(windPos.setY(windPos.y * 0.7), h, 0.25, p1.height * 0.8 * k, p1.height * (4 + 6 * windStrength), 0.28, 'wind');
+}
+
 function checkHit() {
-  if (!player.attackActive || player.hitDone || player.attacks[player.attackIndex].ranged) { hadPrevTip = false; return; }
+  if (!player.attackActive || player.hitDone || player.attacks[player.attackIndex].ranged) { hadPrevTip = false; windPeak = 0; return; }
   p1.group.updateWorldMatrix(true, true);
   bladeBase.copy(p1.sword.userData.base).applyMatrix4(p1.sword.matrixWorld); // sword: 今握っている武器
   bladeTip.copy(p1.sword.userData.tip).applyMatrix4(p1.sword.matrixWorld);
+  const bat = player.weaponId === 'bat';
+  if (bat) {
+    if (hadPrevTip) {
+      const sub = p1.animator.trailOn ? frameDt / 5 : frameDt;
+      const dx = bladeTip.x - rawPrevTip.x;
+      const dz = bladeTip.z - rawPrevTip.z;
+      const speed = Math.hypot(dx, dz, bladeTip.y - rawPrevTip.y) / Math.max(sub, 1e-3) / p1.height;
+      windStrength = Math.min(1, speed / WIND_REF);
+      windPeak = Math.max(windPeak, windStrength);
+      window.__wind = { speed, windStrength };
+      windGust -= sub;
+      if (windStrength > 0.25 && windGust <= 0) {
+        windGust = 0.045;
+        _wd.set(dx, 0, dz);
+        if (_wd.lengthSq() < 1e-8) _wd.set(Math.sin(p1.group.rotation.y), 0, Math.cos(p1.group.rotation.y));
+        spawnWind(_wd, windStrength > 0.6);
+      }
+    } else {
+      windStrength = 0.45;
+    }
+    rawPrevTip.copy(bladeTip);
+    // 風が刃の先を押し広げる: 刃の延長線上へ、振りが強いほど遠くまで当たる
+    _wd.subVectors(bladeTip, bladeBase).normalize();
+    bladeTip.addScaledVector(_wd, WIND_EXTEND * (0.5 + windStrength) * p1.scale);
+  }
   const tx = p2.group.position.x;
   const tz = p2.group.position.z;
-  const r = HIT_RADIUS * p2.scale;
+  const r = HIT_RADIUS * p2.scale * (bat ? windRadiusScale() : 1);
   const low = Math.min(bladeBase.y, bladeTip.y) < p2.group.position.y + p2.height * 1.05;
   const touching = low && (distToSegmentXZ(tx, tz, bladeBase, bladeTip) < r
     || (hadPrevTip && distToSegmentXZ(tx, tz, prevTip, bladeTip) < r));
@@ -691,6 +741,10 @@ function checkHit() {
   slashWorld.set(sdx, sdy, sdz).applyAxisAngle(THREE.Object3D.DEFAULT_UP, p1.group.rotation.y).normalize();
   impact.streak(v1, slashWorld, camera, p2.height * (strong ? 2.2 : 1.6));
   if (strong) impact.ring(p2.group.position, p2.height * 1.3, 0.35);
+  if (bat) { // 風圧: 足もとに広がる輪と、土ぼこり。振りが強いほど大きい
+    impact.ring(p2.group.position, p2.height * (1.2 + 1.8 * windStrength), 0.4);
+    sparks.burst(v1.setY(p2.height * 0.15), forward, Math.round(8 + 14 * windStrength), p2.height * 0.06, p2.height * (2 + 3 * windStrength), 0.12, 0.2);
+  }
 }
 
 // ---- 必殺技のムービー演出 ----
@@ -855,6 +909,7 @@ function step(realDt) {
     p2.group.rotation.y += diff * (1 - Math.exp(-6 * dt));
   }
 
+  frameDt = dt;
   p1.update(dt, checkHit); // 姿勢を進めるたびに、その時点の刃の位置で当たり判定
   p2.update(dt);
   sparks.update(dt, camera, p1.height * 1.1);
