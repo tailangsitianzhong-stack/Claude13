@@ -113,8 +113,10 @@ export class ArrowUltimateDirector {
       const S = p1.scale;
       const yaw = p1.group.rotation.y;
       this.headArrow.position.set(p1.group.position.x, p1.group.position.y + p1.height * (u.phase === 'draw' ? 1.35 : 1.0), p1.group.position.z);
-      this.headArrow.rotation.set(0, yaw, 0);
-      this.headArrow.scale.setScalar(0.001 + 0.62 * (S / 0.15) * Math.min(1, this.headT / 0.2));
+      // 貼られている間は、鼻先を少し上げて（後ろから見ても形がわかる）、突撃では水平に前を向く
+      const pitch = u.phase === 'draw' ? -0.6 * Math.min(1, this.headT / 0.2) : 0;
+      this.headArrow.rotation.set(pitch, yaw, 0, 'YXZ');
+      this.headArrow.scale.setScalar(0.001 + 0.8 * (S / 0.15) * Math.min(1, this.headT / 0.2));
       this.headArrow.userData.setGlow(1, time);
       if (u.phase === 'rush') {
         sparks.burst(this.headArrow.position, w.set(-Math.sin(yaw), 0, -Math.cos(yaw)), 4, p1.height * 0.06, p1.height * 3, 0.5, 1, 0.55, 0.3);

@@ -11,6 +11,44 @@ const dir = new THREE.Vector3();
 
 const HUE = { accel: 0.13, cannon: 0.05, up: 0.4, down: 0.76, slow: 0.58, pull: 0.88 };
 
+// 砲弾の矢印: 太い立体の矢印に、オレンジの光の玉と、うしろへのびる炎。遠くからでも「砲弾だ」とわかる
+let glowTexture = null;
+function glowTex() {
+  if (glowTexture) return glowTexture;
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,255,230,1)'); grad.addColorStop(0.3, 'rgba(255,170,60,0.85)'); grad.addColorStop(1, 'rgba(255,90,20,0)');
+  g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
+  glowTexture = new THREE.CanvasTexture(c);
+  glowTexture.colorSpace = THREE.SRGBColorSpace;
+  return glowTexture;
+}
+function createCannon() {
+  const g = new THREE.Group();
+  const arrow = createArrow3D(ARROW_COLORS.cannon, { variant: 'cannon', depth: 0.45, scale: 1, emissive: 1.3 });
+  g.add(arrow);
+  // 白い芯の輪郭（少し大きい白い矢印を後ろに）で、形をくっきりさせる
+  const rim = createArrow3D(0xffffff, { variant: 'cannon', depth: 1.1, scale: 1.12, emissive: 1.5 });
+  rim.material.transparent = true; rim.material.opacity = 0.0; rim.visible = false;
+  g.add(rim);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex(), color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, fog: false }));
+  sprite.scale.setScalar(2.2);
+  g.add(sprite);
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.7, 3.0, 8).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xff6a10, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
+  flame.position.z = -2.4; // 先がうしろ（-Z）へのびる炎
+  g.add(flame);
+  g.userData.flame = flame;
+  flame.visible = false;   // 構えている間は出さない（撃ち出してから）
+  g.userData.setGlow = (k, time = 0) => {
+    arrow.userData.setGlow(k * 0.5, time);
+    flame.scale.set(1, 1, 0.7 + 0.5 * Math.abs(Math.sin(time * 31)));
+    sprite.material.opacity = 0.35 + 0.15 * Math.sin(time * 22);
+  };
+  return g;
+}
+
 // 床に寝かせる矢印のステッカー（先が dir を向く）
 function createFloorArrow(color, scale) {
   const pivot = new THREE.Group();
@@ -22,6 +60,8 @@ function createFloorArrow(color, scale) {
   pivot.visible = false;
   return pivot;
 }
+
+const CANNON_SCALE = 0.5;   // 砲弾の矢印の大きさ（半分の長さ。ワールド単位 × S/0.15）
 
 export class ArrowDirector {
   // ctx: { scene, camera, impact, sparks, fx, p1, p2, dummy, stage, getPlayer, hooks }
@@ -130,7 +170,8 @@ export class ArrowDirector {
       // ---- スキル1: 砲弾 ----
       case 'arrowSkill1Start': fx.zoom(-40); break;
       case 'arrowCannonStick': {
-        const m = createArrow3D(ARROW_COLORS.cannon, { variant: 'cannon', depth: 0.7, scale: 0.0 });
+        const m = createCannon();
+        m.scale.setScalar(0.001);
         scene.add(m);
         this.cannonHeld = { m, t: 0 };
         p1.joints.rWrist.getWorldPosition(v);
@@ -191,7 +232,7 @@ export class ArrowDirector {
       case 'arrowSkill4Start': fx.zoom(-40); break;
       case 'arrowSlowShot': {
         p1.joints.rWrist.getWorldPosition(v);
-        const m = createArrow3D(ARROW_COLORS.slow, { depth: 0.2, scale: 0.12 });
+        const m = createArrow3D(ARROW_COLORS.slow, { depth: 0.2, scale: 0.2 });
         m.position.copy(v);
         scene.add(m);
         const to = new THREE.Vector3(p2.group.position.x, p2.group.position.y + 3.0 * S, p2.group.position.z);
@@ -269,12 +310,13 @@ export class ArrowDirector {
     this.cannonHeld = null;
     const from = held.m.position.clone();
     const d = this.aimDir(from);
-    held.m.scale.setScalar(0.3 * S / 0.15);
+    held.m.scale.setScalar(CANNON_SCALE * S / 0.15);
     const heading = Math.atan2(d.x, d.z);
     const pitch = -Math.asin(Math.max(-1, Math.min(1, d.y)));
     held.m.rotation.set(pitch, heading, 0, 'YXZ');
-    this.cannons.push({ m: held.m, p: from, d, left: 260 * S, speed: 240 * S });
-    impact.flash(from, p1.height * 2.2, 0.25);
+    held.m.userData.flame.visible = true;
+    this.cannons.push({ m: held.m, p: from, d, left: 260 * S, speed: 240 * S, t: 0 });
+    impact.flash(from, p1.height * 1.4, 0.2);
     impact.ring(p1.group.position, p1.height * 2.0, 0.4);
     sparks.burst(from, d, 16, p1.height * 0.06, p1.height * 4, HUE.cannon, 1, 0.55, 0.3);
     fx.shake(0.7); fx.zoom(180); fx.kick(0, 0.2, 1.6);
@@ -344,22 +386,26 @@ export class ArrowDirector {
     if (ch) {
       ch.t += dt;
       const yaw = p1.group.rotation.y;
-      ch.m.position.set(p1.group.position.x + Math.sin(yaw) * 4.2 * S, p1.height * 0.8, p1.group.position.z + Math.cos(yaw) * 4.2 * S);
-      ch.m.rotation.set(0, yaw, 0);
-      ch.m.scale.setScalar((0.3 * S / 0.15) * Math.min(1, ch.t / 0.2));
+      ch.m.position.set(p1.group.position.x + Math.sin(yaw) * 3.6 * S, p1.height * 1.55, p1.group.position.z + Math.cos(yaw) * 3.6 * S);
+      ch.m.rotation.set(-0.95 * Math.min(1, ch.t / 0.2), yaw, 0, 'YXZ'); // 鼻先を上げて構える（後ろから見ても、矢印の形がわかる）
+      ch.m.scale.setScalar((CANNON_SCALE * S / 0.15) * Math.min(1, ch.t / 0.2));
       ch.m.userData.setGlow(1, time);
     }
     // 飛んでいる砲弾
     const B = stage.bounds;
     for (let i = this.cannons.length - 1; i >= 0; i--) {
       const c = this.cannons[i];
-      const step = Math.min(c.left, c.speed * dt);
+      c.t += dt;
+      // 撃ち出した直後はゆっくり、そこから一気に加速（飛んでいくのが見える）
+      const speed = c.speed * (0.28 + 0.72 * Math.min(1, c.t / 0.2));
+      const step = Math.min(c.left, speed * dt);
       const prev = c.p.clone();
       c.p.addScaledVector(c.d, step);
       c.left -= step;
       c.m.position.copy(c.p);
       c.m.userData.setGlow(1, time);
-      sparks.burst(c.p, w.set(0, 0, 0), 2, p1.height * 0.05, p1.height * 0.8, HUE.cannon, 1, 0.55, 0.3);
+      sparks.burst(c.p, w.set(0, 0, 0), 3, p1.height * 0.07, p1.height * 1.0, HUE.cannon, 1, 0.55, 0.3);
+      if (Math.random() < 0.5) impact.ring(w.set(c.p.x, 0, c.p.z), p1.height * 0.9, 0.18); // 通った地面に、衝撃の輪
       const foe = new THREE.Vector3(p2.group.position.x, p2.group.position.y + 3.0 * S, p2.group.position.z);
       const seg = new THREE.Vector3().subVectors(c.p, prev);
       const len2 = seg.lengthSq();

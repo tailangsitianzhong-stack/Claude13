@@ -75,7 +75,7 @@ export const ARROW_COLORS = {
 export function createArrow3D(color = 0xff5a1f, { variant = 'single', depth = 0.5, scale = 1, pointing = 'z', emissive = 0.9 } = {}) {
   const geo = new THREE.ExtrudeGeometry(arrowShape(variant), { depth, bevelEnabled: false });
   geo.translate(0, 0, -depth / 2);
-  if (pointing === 'z') geo.rotateX(-Math.PI / 2); // +Y → +Z（厚みは Y 方向）
+  if (pointing === 'z') geo.rotateX(Math.PI / 2); // +Y → +Z（先が前を向く。厚みは上下方向）
   const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: emissive, roughness: 0.4, metalness: 0.1 }));
   m.scale.setScalar(scale);
   m.castShadow = false;
