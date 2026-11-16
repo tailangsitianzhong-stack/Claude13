@@ -721,7 +721,195 @@ function down(ctx, o) {
   o.swordTilt = 1.5; o.swordTwist = 1.2;
 }
 
+// ============================================================
+// スキル1（剣投げ → 引き寄せ → 連打 → 引き抜いて蹴り飛ばす）のポーズ
+// ============================================================
+// 剣を頭上で振り回す: ctx.spin（回した角度）で剣が手首を軸にプロペラのように回る
+function spinUp(ctx, o) {
+  const a = ctx.spin;
+  o.hipsYaw = -0.2; o.waistYaw = -0.25 + 0.14 * sin(a); o.neckYaw = 0.4;
+  o.waistPitch = -0.06 + 0.05 * cos(a); o.waistRoll = 0.06 * sin(a);
+  o.lHipSwing = 0.35; o.lKnee = 0.5; o.lHipOut = 0.16; o.lFlat = 1;
+  o.rHipSwing = -0.25; o.rKnee = 0.55; o.rHipOut = 0.18; o.rFlat = 0.8;
+  o.rShoulderSwing = 2.45 + 0.12 * cos(a); o.rShoulderOut = 0.45 + 0.12 * sin(a); o.rElbow = 0.55;
+  o.swordTilt = 0.15; o.swordTwist = a;
+  o.lShoulderSwing = 0.9; o.lShoulderOut = 0.25; o.lElbow = 0.9; // 左手は狙いを定める
+}
+
+// 投げる: 大きく後ろへ引いて、踏み込みながら上手投げ
+const THROW_SWORD = [
+  { t: 0, pose: (o) => {
+    o.hipsYaw = -0.45; o.waistYaw = -0.75; o.neckYaw = 1.0; o.waistPitch = -0.12;
+    o.lHipSwing = 0.45; o.lKnee = 0.45; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.35; o.rKnee = 0.7; o.rHipOut = 0.18; o.rFlat = 0.6;
+    o.rShoulderSwing = 2.7; o.rShoulderOut = 0.75; o.rElbow = 1.5; o.swordTilt = -0.2;
+    o.lShoulderSwing = 1.35; o.lShoulderOut = 0.0; o.lElbow = 0.3;
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => { // 手を離す瞬間: 腕が前へ伸びきる
+    o.hipsYaw = 0.25; o.waistYaw = 0.5; o.neckYaw = -0.6; o.waistPitch = 0.3; o.hipsPitch = 0.08;
+    o.lHipSwing = 0.75; o.lKnee = 0.75; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.6; o.rKnee = 0.35; o.rHipOut = 0.12; o.rFlat = 0.2;
+    o.rShoulderSwing = 1.55; o.rShoulderOut = 0.0; o.rElbow = 0.1; o.swordTilt = 1.3;
+    o.lShoulderSwing = -0.5; o.lShoulderOut = 0.45; o.lElbow = 0.7;
+  } },
+  { t: 1, ease: 'out', pose: (o) => { // 振り抜き
+    o.hipsYaw = 0.35; o.waistYaw = 0.7; o.neckYaw = -0.9; o.waistPitch = 0.42; o.hipsPitch = 0.1;
+    o.lHipSwing = 0.8; o.lKnee = 0.85; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.55; o.rKnee = 0.4; o.rHipOut = 0.12; o.rFlat = 0.25;
+    o.rShoulderSwing = 0.7; o.rShoulderOut = -0.5; o.rElbow = 0.3;
+    o.lShoulderSwing = -0.7; o.lShoulderOut = 0.5; o.lElbow = 0.6;
+  } },
+];
+const throwSword = (ctx, o) => keyed(ctx.attackT, THROW_SWORD, o);
+
+// 引き寄せる: 左手をかざし（attackT 0）、綱を手繰るように体ごと引く（attackT 1）
+const BECKON = [
+  { t: 0, pose: (o) => {
+    o.hipsYaw = -0.3; o.waistYaw = -0.5; o.neckYaw = 0.75; o.waistPitch = 0.12;
+    o.lHipSwing = 0.6; o.lKnee = 0.6; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.4; o.rKnee = 0.5; o.rHipOut = 0.16; o.rFlat = 0.7;
+    o.lShoulderSwing = 1.6; o.lShoulderOut = -0.25; o.lShoulderTwist = 0.3; o.lElbow = 0.1;
+    o.rShoulderSwing = -0.2; o.rShoulderOut = 0.3; o.rElbow = 1.3;
+  } },
+  { t: 0.35, ease: 'out', pose: (o) => { // かざしたまま指を握り込む間
+    o.hipsYaw = -0.32; o.waistYaw = -0.55; o.neckYaw = 0.8; o.waistPitch = 0.16;
+    o.lHipSwing = 0.65; o.lKnee = 0.7; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.4; o.rKnee = 0.55; o.rHipOut = 0.16; o.rFlat = 0.7;
+    o.lShoulderSwing = 1.65; o.lShoulderOut = -0.25; o.lShoulderTwist = 0.3; o.lElbow = 0.05;
+    o.rShoulderSwing = -0.25; o.rShoulderOut = 0.3; o.rElbow = 1.4;
+  } },
+  { t: 1, ease: 'inout', pose: (o) => { // 体重を後ろへかけて引き切る
+    o.hipsYaw = -0.1; o.waistYaw = 0.1; o.neckYaw = 0.0; o.waistPitch = -0.2; o.hipsPitch = -0.06;
+    o.lHipSwing = 0.5; o.lKnee = 0.35; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.2; o.rKnee = 0.85; o.rHipOut = 0.16; o.rFlat = 1;
+    o.lShoulderSwing = 0.75; o.lShoulderOut = 0.1; o.lShoulderTwist = 0.3; o.lElbow = 1.75;
+    o.rShoulderSwing = 0.5; o.rShoulderOut = 0.25; o.rElbow = 1.9; // 右拳を構える
+  } },
+];
+const beckon = (ctx, o) => keyed(ctx.attackT, BECKON, o);
+
+// 連打: ctx.phase の半周期ごとに左右の拳が交互に伸びる。腰と肩を入れ、体を上下させる
+function flurry(ctx, o) {
+  const p = ctx.phase;
+  const sL = sin(p);
+  o.hipsYaw = -0.16 * sL; o.waistYaw = -0.42 * sL; o.neckYaw = 0.5 * sL; // 打つ側の肩が前へ
+  o.waistPitch = 0.2 + 0.05 * cos(2 * p); o.hipsPitch = 0.05; o.neckPitch = -0.12;
+  o.hipsX = 0.05 * sL;
+  o.lHipSwing = 0.5; o.lKnee = 0.6 + 0.08 * cos(2 * p); o.lHipOut = 0.16; o.lFlat = 1;
+  o.rHipSwing = -0.3; o.rKnee = 0.6 + 0.08 * cos(2 * p); o.rHipOut = 0.18; o.rFlat = 0.6;
+  for (const [k, off] of SIDES) {
+    const e = smooth(max(0, sin(p + off)) * 1.25); // 0 = 引いている, 1 = 伸びきり
+    o[k + 'ShoulderSwing'] = 0.75 + 0.75 * e;
+    o[k + 'ShoulderOut'] = 0.28 - 0.3 * e;
+    o[k + 'ShoulderTwist'] = 0.5;
+    o[k + 'Elbow'] = 1.95 - 1.8 * e;
+  }
+}
+
+// 引き抜く: 右手を柄へ伸ばして握り（〜0.5）、体をひねって一気に引き抜く
+const PULL_OUT = [
+  { t: 0, pose: (o) => {
+    o.hipsYaw = 0.1; o.waistYaw = 0.3; o.neckYaw = -0.3; o.waistPitch = 0.22;
+    o.lHipSwing = 0.5; o.lKnee = 0.6; o.lHipOut = 0.16; o.lFlat = 1;
+    o.rHipSwing = -0.3; o.rKnee = 0.6; o.rHipOut = 0.18; o.rFlat = 0.6;
+    o.rShoulderSwing = 1.4; o.rShoulderOut = -0.2; o.rShoulderTwist = 0.4; o.rElbow = 0.75; o.swordTilt = 1.57;
+    o.lShoulderSwing = 0.9; o.lShoulderOut = 0.1; o.lElbow = 1.5;
+  } },
+  { t: 0.5, ease: 'out', pose: (o) => { // 柄を握ってためる
+    o.hipsYaw = 0.2; o.waistYaw = 0.45; o.neckYaw = -0.5; o.waistPitch = 0.3;
+    o.lHipSwing = 0.6; o.lKnee = 0.75; o.lHipOut = 0.16; o.lFlat = 1;
+    o.rHipSwing = -0.3; o.rKnee = 0.65; o.rHipOut = 0.18; o.rFlat = 0.6;
+    o.rShoulderSwing = 1.45; o.rShoulderOut = -0.25; o.rShoulderTwist = 0.4; o.rElbow = 0.4; o.swordTilt = 1.57;
+    o.lShoulderSwing = 1.35; o.lShoulderOut = -0.1; o.lElbow = 0.5; // 左手で相手の肩を押さえる
+  } },
+  { t: 1, ease: 'in', pose: (o) => { // 引き抜いた: 剣は右後ろへ
+    o.hipsYaw = -0.35; o.waistYaw = -0.7; o.neckYaw = 0.95; o.waistPitch = -0.05;
+    o.lHipSwing = 0.4; o.lKnee = 0.4; o.lHipOut = 0.16; o.lFlat = 1;
+    o.rHipSwing = -0.35; o.rKnee = 0.7; o.rHipOut = 0.18; o.rFlat = 0.9;
+    o.rShoulderSwing = -0.5; o.rShoulderOut = 0.7; o.rElbow = 0.9; o.swordTilt = 1.3;
+    o.lShoulderSwing = 1.2; o.lShoulderOut = 0.0; o.lElbow = 0.6;
+  } },
+];
+const pullOut = (ctx, o) => keyed(ctx.attackT, PULL_OUT, o);
+
+// 蹴り飛ばす: 右膝を抱え上げ（0）、足裏を突き出し（0.45）、残して（0.7）、下ろす（1）
+const KICK = [
+  { t: 0, pose: (o) => {
+    o.hipsYaw = -0.2; o.waistYaw = -0.3; o.neckYaw = 0.45; o.hipsPitch = -0.05; o.waistPitch = 0.1;
+    o.lHipSwing = 0.1; o.lKnee = 0.4; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = 1.55; o.rKnee = 2.0; o.rHipOut = 0.05; o.rAnkle = 0.3;
+    o.rShoulderSwing = -0.3; o.rShoulderOut = 0.7; o.rElbow = 0.8; o.swordTilt = 1.4;
+    o.lShoulderSwing = 1.0; o.lShoulderOut = 0.2; o.lElbow = 1.4;
+  } },
+  { t: 0.45, ease: 'in', pose: (o) => {
+    o.hipsYaw = 0.1; o.waistYaw = 0.1; o.neckYaw = -0.15; o.hipsPitch = -0.38; o.waistPitch = -0.05; o.neckPitch = 0.3;
+    o.lHipSwing = -0.38; o.lKnee = 0.15; o.lHipOut = 0.1; o.lFlat = 1; // 軸足は伸ばす（体を後ろへ倒した分を打ち消す）
+    o.rHipSwing = 1.2; o.rKnee = 0.05; o.rHipOut = 0.03; o.rAnkle = 0.5;
+    o.rShoulderSwing = -0.7; o.rShoulderOut = 0.8; o.rElbow = 0.5; o.swordTilt = 1.5;
+    o.lShoulderSwing = -0.3; o.lShoulderOut = 0.7; o.lElbow = 0.6;
+  } },
+  { t: 0.7, ease: 'out', pose: (o) => {
+    o.hipsYaw = 0.12; o.waistYaw = 0.12; o.neckYaw = -0.15; o.hipsPitch = -0.34; o.waistPitch = -0.03; o.neckPitch = 0.28;
+    o.lHipSwing = -0.34; o.lKnee = 0.2; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = 1.15; o.rKnee = 0.1; o.rHipOut = 0.03; o.rAnkle = 0.45;
+    o.rShoulderSwing = -0.65; o.rShoulderOut = 0.8; o.rElbow = 0.5; o.swordTilt = 1.5;
+    o.lShoulderSwing = -0.25; o.lShoulderOut = 0.7; o.lElbow = 0.6;
+  } },
+  { t: 1, ease: 'inout', pose: (o) => {
+    o.waistPitch = 0.1;
+    o.lHipSwing = -0.1; o.lKnee = 0.3; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = 0.55; o.rKnee = 0.7; o.rHipOut = 0.1; o.rFlat = 1;
+    o.rShoulderSwing = 0.1; o.rShoulderOut = 0.4; o.rElbow = 0.6; o.swordTilt = 1.2;
+    o.lShoulderSwing = 0.4; o.lShoulderOut = 0.3; o.lElbow = 0.8;
+  } },
+];
+const kick = (ctx, o) => keyed(ctx.attackT, KICK, o);
+
+// --- スキルを受ける側 ---
+// 剣が刺さった: 後ろへよろめき、左手で剣を掴む
+function impaled(ctx, o) {
+  const w = sin(ctx.time * 14);
+  const j = ctx.jolt; // 引き抜かれた瞬間に前へ引っぱられる
+  o.hipsPitch = -0.08 + 0.2 * j; o.waistPitch = -0.3 + 0.55 * j; o.neckPitch = -0.35 + 0.5 * j;
+  o.waistYaw = 0.2 + 0.04 * w;
+  o.lHipSwing = -0.4; o.lKnee = 0.55 + 0.05 * w; o.lHipOut = 0.14; o.lFlat = 1;
+  o.rHipSwing = 0.3; o.rKnee = 0.6 - 0.05 * w; o.rHipOut = 0.16; o.rFlat = 1;
+  o.lShoulderSwing = 1.1; o.lShoulderOut = -0.2; o.lShoulderTwist = 0.7; o.lElbow = 1.7;
+  o.rShoulderSwing = -0.2 + 0.1 * w; o.rShoulderOut = 0.8; o.rElbow = 0.5;
+}
+
+// 引き寄せられている: 胸から引っぱられ、手足が後ろへ流れる
+function dragged(ctx, o) {
+  const w = sin(ctx.time * 21);
+  o.ground = 0;
+  o.hipsPitch = 0.25; o.waistPitch = -0.45; o.neckPitch = -0.4;
+  for (const [k, off] of SIDES) {
+    const sgn = off === 0 ? 1 : -1;
+    o[k + 'ShoulderSwing'] = -0.75 + 0.2 * w * sgn; o[k + 'ShoulderOut'] = 0.55; o[k + 'Elbow'] = 0.35;
+    o[k + 'HipSwing'] = -0.55 - 0.2 * w * sgn; o[k + 'HipOut'] = 0.12; o[k + 'Knee'] = 0.7 + 0.25 * w * sgn; o[k + 'Ankle'] = -0.5;
+  }
+}
+
+// 連打を浴びている: 1発ごと（ctx.jolt が 1 になる）に頭と上体が弾かれ、打たれた側へねじれる
+function pummeled(ctx, o) {
+  const j = ctx.jolt;
+  const side = ctx.joltSide;
+  const w = sin(ctx.time * 17);
+  o.hipsPitch = -0.05 - 0.08 * j; o.waistPitch = -0.12 - 0.3 * j; o.neckPitch = -0.15 - 0.55 * j;
+  o.waistYaw = 0.35 * j * side; o.neckYaw = 0.5 * j * side; o.neckRoll = 0.2 * j * side;
+  o.hipsX = 0.06 * j * side;
+  o.lHipSwing = -0.25; o.lKnee = 0.55 + 0.12 * j; o.lHipOut = 0.14; o.lFlat = 1;
+  o.rHipSwing = 0.2; o.rKnee = 0.6 + 0.12 * j; o.rHipOut = 0.16; o.rFlat = 1;
+  for (const [k, off] of SIDES) {
+    const sgn = off === 0 ? 1 : -1;
+    o[k + 'ShoulderSwing'] = 0.25 - 0.5 * j + 0.06 * w * sgn;
+    o[k + 'ShoulderOut'] = 0.45 + 0.45 * j;
+    o[k + 'Elbow'] = 0.7 - 0.2 * j;
+  }
+}
+
 export const POSES = {
+  spinUp, throwSword, beckon, flurry, pullOut, kick, impaled, dragged, pummeled,
   stand, fight, walk, run, crouch, air, land, attack1, attack2, attack3, airSlam, hit,
   grab, liftCrouch, carry, throw: throwDown, struggle, thrown, down, brake,
 };

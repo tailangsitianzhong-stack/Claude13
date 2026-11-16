@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
-import { CharacterController, ATTACKS, AIR_SLAM, FINISHER } from './character/Controller.js';
+import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1 } from './character/Controller.js';
 import { input } from './input.js';
 import { TouchControls } from './ui/TouchControls.js';
 import { CameraFx } from './camera/CameraFx.js';
@@ -93,6 +93,7 @@ function readCommand() {
     run: input.isDown('ShiftLeft', 'ShiftRight') || touch.run,
     jump: input.wasPressed('Space') || touch.takeJump(),
     attack: input.isDown('KeyJ', 'Mouse0') || touch.attack,
+    skill: input.wasPressed('KeyK', 'KeyE') || touch.takeSkill(),
     toggleStance: input.wasPressed('KeyF'),
   };
 }
@@ -119,7 +120,9 @@ function toCameraSpace(character, [x, y, z]) {
 // 攻撃の節目ごとのカメラ演出
 function onAttackEvent(e) {
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type === 'brake') {
+  if (e.type.startsWith('skill')) {
+    onSkillEvent(e);
+  } else if (e.type === 'brake') {
     // 急停止: 足元に土煙
     v1.set(p1.group.position.x, 0.03, p1.group.position.z);
     forward.set(Math.sin(p1.group.rotation.y), 0, Math.cos(p1.group.rotation.y));
@@ -186,6 +189,82 @@ function onAttackEvent(e) {
     forward.set(0, 0, 0);
     sparks.burst(v1, forward, 14, p1.height * 0.07, p1.height * 1.6, 0.25, 0.25);
   }
+}
+
+// スキル1の節目ごとの演出
+function onSkillEvent(e) {
+  const h = p1.group.rotation.y;
+  const chest = v1.set(p2.group.position.x, p2.group.position.y + p2.height * 0.62, p2.group.position.z);
+  forward.set(Math.sin(h), 0, Math.cos(h));
+  if (e.type === 'skillStart') {
+    fx.zoom(40);
+  } else if (e.type === 'skillThrow') {
+    fx.zoom(90);                       // 投げる勢いで視野が広がる
+    fx.kick(0, -0.3, 0.9);
+    fx.roll(-0.8);
+  } else if (e.type === 'skillStick') {
+    hitStop = 0.11;                    // 刺さった瞬間: 止めて、寄せる
+    flash = 0.1;
+    fx.shake(0.5);
+    fx.zoom(-150);
+    impact.flash(chest, p2.height * 2.0, 0.18);
+    impact.streak(chest, forward, camera, p2.height * 2.4);
+    sparks.burst(chest, forward, 14, p2.height * 0.06, p2.height * 3.4);
+  } else if (e.type === 'skillPull') {
+    fx.zoom(50);
+  } else if (e.type === 'skillPunch') {
+    // 1発ごと: 小さな閃光と火花、画面を左右に小突く。終盤ほど強く
+    const power = 0.5 + 0.5 * Math.min(1, e.count / 12);
+    flash = 0.035;
+    fx.shake(0.13 + 0.1 * power);
+    fx.kick(e.side * 0.35 * power, 0.1, -0.25 * power);
+    chest.x += (Math.random() - 0.5) * p2.height * 0.3;
+    chest.y += (Math.random() - 0.2) * p2.height * 0.3;
+    impact.flash(chest, p2.height * (0.8 + 0.5 * power), 0.09);
+    sparks.burst(chest, forward, 4, p2.height * 0.045, p2.height * 2.6);
+  } else if (e.type === 'skillPullOut') {
+    hitStop = 0.07;
+    flash = 0.08;
+    fx.shake(0.4);
+    fx.kick(0.6, 0.2, 0.5);
+    fx.roll(1.0);
+    forward.negate();                  // 引き抜いた向き（手前）へ火花
+    impact.streak(chest, forward, camera, p2.height * 2.0);
+    sparks.burst(chest, forward, 12, p2.height * 0.055, p2.height * 3.0);
+    sparks.burst(chest, forward, 8, p2.height * 0.05, p2.height * 3.6, 0.53, 0.9);
+  } else if (e.type === 'skillKick') {
+    hitStop = 0.17;                    // 蹴り: 一番重い手応え
+    flash = 0.14;
+    fx.shake(0.95);
+    fx.zoom(-210);
+    fx.kick(0, 0.3, -1.4);
+    impact.flash(chest, p2.height * 3.0, 0.22);
+    impact.streak(chest, forward, camera, p2.height * 3.0);
+    impact.ring(p2.group.position, p2.height * 2.0, 0.45);
+    impact.wave(chest, h, Math.PI / 2, p2.height * 1.3, p2.height * 9);
+    sparks.burst(chest, forward, 24, p2.height * 0.07, p2.height * 4.2);
+    sparks.burst(chest, forward, 12, p2.height * 0.06, p2.height * 3.0, 0.53, 0.9);
+  }
+}
+
+// 引き寄せ中の光の綱（かざした手 → 刺さった剣）
+const tetherMesh = new THREE.Mesh(
+  new THREE.CylinderGeometry(1, 1, 1, 6, 1, true).rotateX(Math.PI / 2),
+  new THREE.MeshBasicMaterial({ color: 0x7fe6ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
+);
+tetherMesh.visible = false;
+tetherMesh.frustumCulled = false;
+scene.add(tetherMesh);
+function updateTether(time) {
+  const t = player.tether;
+  tetherMesh.visible = !!t && t.power > 0.01;
+  if (!tetherMesh.visible) return;
+  const len = t.from.distanceTo(t.to);
+  const w = p1.height * 0.022 * (1 + 0.35 * Math.sin(time * 60)); // 細かく脈打つ
+  tetherMesh.position.lerpVectors(t.from, t.to, 0.5);
+  tetherMesh.lookAt(t.to);
+  tetherMesh.scale.set(w, w, len);
+  tetherMesh.material.opacity = 0.85 * t.power;
 }
 
 // 空中攻撃の着地: 剣が叩いた地点を中心に、まわりの相手をまとめて吹き飛ばす範囲攻撃
@@ -321,6 +400,7 @@ function step(realDt) {
   // コンボ技を出せる間、ジャンプボタン（と PC の案内）を切り替える
   const canFinish = player.finisherWindow > 0 && player.canGrab();
   touch.setSpecial(canFinish);
+  touch.setSkillCooldown(player.skillCooldown / SKILL1.cooldown, player.skillCooldown, player.state === 'skill');
   comboPrompt.classList.toggle('show', canFinish);
 
   for (const e of player.events) onAttackEvent(e);
@@ -332,7 +412,7 @@ function step(realDt) {
   const sx = p1.group.position.x - p2.group.position.x;
   const sz = p1.group.position.z - p2.group.position.z;
   const sep = Math.hypot(sx, sz);
-  const grappling = player.state === 'finisher' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
+  const grappling = player.state === 'finisher' || player.state === 'skill' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
   if (!grappling && sep < minDist && sep > 1e-6 && p1.group.position.y < p2.height) {
     p1.group.position.x = p2.group.position.x + (sx / sep) * minDist;
     p1.group.position.z = p2.group.position.z + (sz / sep) * minDist;
@@ -357,6 +437,7 @@ function step(realDt) {
   sparks.update(dt);
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
   groundBreak.update(realDt);
+  updateTether(clock.elapsedTime);
   flash = Math.max(0, flash - realDt);
   p2.setFlash(flash > 0 ? 1 : 0);
 
@@ -364,12 +445,19 @@ function step(realDt) {
   if (window.game.follow) {
     // 視点と移動は分離: 歩いても走ってもカメラの向きは変わらない。
     // 攻撃中だけ、狙っている相手が画面に収まるよう背後へゆっくり回り込む（視点を触った直後は回らない）
-    const align = player.state === 'attack' ? { heading: player.aimYaw, rate: ATTACK_ALIGN_RATE } : null;
+    const align = player.state === 'attack' ? { heading: player.aimYaw, rate: ATTACK_ALIGN_RATE }
+      : player.state === 'skill' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE } : null;
     // コンボ技の間はカメラを引き、高く跳んでも2人が画面に収まるようにする
     const cinematic = player.state === 'finisher' || player.finisherSlam;
-    view.zoomTarget = cinematic ? 2.3 : 1;
+    // スキル1: 投げて引き寄せるまでは少し引き、連打からは近くで見せる
+    const skillPhase = player.sk ? player.sk.phase : null;
+    const skillZoom = !skillPhase ? 1 : (skillPhase === 'flurry' || skillPhase === 'pullOut' || skillPhase === 'kick') ? 1.1 : 1.5;
+    view.zoomTarget = cinematic ? 2.3 : skillZoom;
     view.heightFollow = cinematic ? 0.5 : 0.4;
-    view.update(realDt, p1.group.position, align);
+    // スキル1で相手を捉えている間は、2人の中間を映す（投げた先の相手が画面から出ないように）
+    let focus = p1.group.position;
+    if (player.sk && player.sk.hasTarget) focus = v1.lerpVectors(p1.group.position, p2.group.position, 0.5).setY(p1.group.position.y);
+    view.update(realDt, focus, align);
   } else {
     camera.lookAt(controls.target);
   }

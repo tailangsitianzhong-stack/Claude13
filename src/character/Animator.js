@@ -25,6 +25,9 @@ export class Animator {
     this.leanV = 0;
     this.bankV = 0;
     this.settle = false;
+    this.spin = 0;           // スキル: 剣を振り回した角度
+    this.jolt = 0;           // 殴られた直後に 1、すぐ 0 へ戻る（受ける側のポーズ用）
+    this.joltSide = 1;       // どちら側から殴られたか（+1 / -1）
     this.group = group;
     this.joints = joints;
     this.soles = soles;
@@ -65,6 +68,7 @@ export class Animator {
 
   update(dt) {
     this.time += dt;
+    this.jolt *= Math.exp(-13 * dt);
     // 傾きは少し揺れながら目標へ落ち着くバネ（止まった直後に体が揺り戻す）
     const h = Math.min(dt, 0.033);
     this.leanV += ((this.leanTarget - this.lean) * 140 - this.leanV * 15) * h;

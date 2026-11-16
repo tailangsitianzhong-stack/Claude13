@@ -168,6 +168,7 @@ export function createCharacter(options = {}) {
     hips, waist, neck,
     lShoulder: lArm.shoulder, lElbow: lArm.elbow,
     rShoulder: rArm.shoulder, rElbow: rArm.elbow, rWrist: rArm.wrist,
+    lWrist: lArm.wrist,
     lHip: lLeg.hip, lKnee: lLeg.knee, lAnkle: lLeg.ankle,
     rHip: rLeg.hip, rKnee: rLeg.knee, rAnkle: rLeg.ankle,
   };

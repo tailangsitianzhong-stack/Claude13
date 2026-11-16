@@ -1,6 +1,6 @@
 // スマホ横画面用の操作UI。
 //  - 左半分: 触れた場所に出るスティック。倒した量で歩く速さが変わり、外周まで倒し切ると走る
-//  - 右下  : 攻撃ボタン（押している間は連続斬り）と、その左に一回り小さいジャンプボタン
+//  - 右下  : 攻撃ボタン（押している間は連続斬り）。その左にジャンプ、真上にスキル1（どちらも一回り小さい）
 // 画面のそれ以外の場所（右上側）をドラッグするとカメラが回る（OrbitControls が担当）。
 
 const RUN_THRESHOLD = 0.92; // これ以上倒すと走る
@@ -47,6 +47,28 @@ const CSS = `
   display: grid; place-items: center; transition: transform 0.05s, box-shadow 0.05s; }
 #jump-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(5, 40, 110, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
 #jump-btn svg { width: 54%; height: 54%; }
+/* スキル1: 攻撃ボタンの真上に、ジャンプボタンと同じ大きさで */
+#skill-btn { position: absolute; width: var(--btn2); height: var(--btn2);
+  right: calc(28px + env(safe-area-inset-right) + (var(--btn) - var(--btn2)) / 2);
+  bottom: calc(26px + env(safe-area-inset-bottom) + var(--btn) + 14px);
+  border-radius: 50%; pointer-events: auto; touch-action: none; overflow: hidden;
+  background: radial-gradient(circle at 50% 35%, rgba(190, 120, 255, 0.95), rgba(110, 40, 200, 0.95));
+  border: 4px solid rgba(255, 255, 255, 0.85); box-sizing: border-box;
+  box-shadow: 0 4px 0 rgba(50, 10, 100, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3);
+  display: grid; place-items: center; transition: transform 0.05s, box-shadow 0.05s, filter 0.15s; }
+#skill-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(50, 10, 100, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
+#skill-btn svg { width: 60%; height: 60%; grid-area: 1 / 1; }
+/* 使用中・クールタイム中: 暗くなり、残り時間ぶんの扇形が覆う。残り秒数を表示 */
+#skill-btn.cooling, #skill-btn.busy { filter: saturate(0.35) brightness(0.8); }
+#skill-btn .cd-cover { grid-area: 1 / 1; width: 100%; height: 100%; border-radius: 50%;
+  background: conic-gradient(rgba(10, 10, 25, 0.72) calc(var(--cd, 0) * 360deg), transparent 0); }
+#skill-btn .cd-num { grid-area: 1 / 1; z-index: 1; color: #fff; font: 800 calc(var(--btn2) * 0.36)/1 system-ui, sans-serif;
+  text-shadow: 0 2px 3px #000a; display: none; }
+#skill-btn.cooling .cd-num { display: block; }
+#skill-btn.cooling svg { opacity: 0.35; }
+#skill-btn.ready-pop { animation: skill-ready 0.35s ease-out; }
+@keyframes skill-ready { 0% { transform: scale(1.3); filter: brightness(1.8); } 100% { transform: scale(1); } }
+
 /* コンボ技を出せる間: 金色に変わって脈打つ「掴み」ボタンになる */
 #jump-btn .icon-grab { display: none; }
 #jump-btn.special { background: radial-gradient(circle at 50% 35%, #ffe27a, #ff9d00);
@@ -91,6 +113,20 @@ const GRAB_SVG = `
   <polyline points="22,12 32,3 42,12" fill="none" stroke="#6b3a00" stroke-width="5"/>
 </svg>`;
 
+// スキル1のアイコン（回転する剣）
+const SKILL_SVG = `
+<svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M10 30 A22 22 0 0 1 50 18" fill="none" stroke="#fff" stroke-width="5"/>
+  <polygon points="52,8 55,23 41,19" fill="#fff"/>
+  <path d="M54 34 A22 22 0 0 1 14 46" fill="none" stroke="#fff" stroke-width="5"/>
+  <polygon points="12,56 9,41 23,45" fill="#fff"/>
+  <g transform="rotate(45 32 32)">
+    <polygon points="29.5,12 34.5,12 34.5,36 32,41 29.5,36" fill="#f2f5f8" stroke="#3a0f6e" stroke-width="2"/>
+    <rect x="24" y="40" width="16" height="4" rx="1" fill="#e8c14a" stroke="#3a0f6e" stroke-width="2"/>
+    <rect x="30" y="44" width="4" height="7" fill="#7a4a28" stroke="#3a0f6e" stroke-width="2"/>
+  </g>
+</svg>`;
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -99,6 +135,8 @@ export class TouchControls {
     this.attack = false;
     this.jumpQueued = false; // ジャンプが押された（読み取られるまで保持）
     this.special = false;
+    this.skillQueued = false; // スキル1が押された（読み取られるまで保持）
+    this.cooling = false;
     this.enabled = false;
 
     const style = document.createElement('style');
@@ -111,6 +149,7 @@ export class TouchControls {
     this.root.innerHTML = `
       <div id="stick-zone"><div id="stick-base"><span id="run-label">RUN</span><div id="stick-knob"></div></div></div>
       <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}${GRAB_SVG}</div>
+      <div id="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
       <div id="attack-btn" role="button" aria-label="攻撃">${SWORD_SVG}</div>`;
     document.body.appendChild(this.root);
 
@@ -124,12 +163,15 @@ export class TouchControls {
     this.knob = this.root.querySelector('#stick-knob');
     this.btn = this.root.querySelector('#attack-btn');
     this.jumpBtn = this.root.querySelector('#jump-btn');
+    this.skillBtn = this.root.querySelector('#skill-btn');
+    this.cdNum = this.skillBtn.querySelector('.cd-num');
 
     this.resize();
     addEventListener('resize', () => this.resize());
     this.bindStick();
     this.bindButton();
     this.bindJump();
+    this.bindSkill();
 
     // タッチ操作の端末なら表示。PC でも画面に触れたら表示に切り替える
     if (matchMedia('(pointer: coarse)').matches) this.enable();
@@ -227,6 +269,47 @@ export class TouchControls {
       this.run = mag >= RUN_THRESHOLD;
     }
     this.base.classList.toggle('run', this.run);
+  }
+
+  takeSkill() {
+    const k = this.skillQueued;
+    this.skillQueued = false;
+    return k;
+  }
+
+  bindSkill() {
+    this.skillBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.skillBtn.setPointerCapture(e.pointerId);
+      this.skillQueued = true;
+      this.skillBtn.classList.add('pressed');
+      navigator.vibrate?.(8);
+    });
+    const end = () => this.skillBtn.classList.remove('pressed');
+    this.skillBtn.addEventListener('pointerup', end);
+    this.skillBtn.addEventListener('pointercancel', end);
+    this.skillBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  // スキル1の状態を表示。ratio: 残りクールタイムの割合（0〜1）、seconds: 残り秒数、busy: 使用中
+  setSkillCooldown(ratio, seconds, busy) {
+    const cooling = ratio > 0;
+    this.skillBtn.style.setProperty('--cd', busy ? 1 : ratio.toFixed(3));
+    this.skillBtn.classList.toggle('busy', busy);
+    if (cooling !== this.cooling) {
+      this.skillBtn.classList.toggle('cooling', cooling);
+      if (!cooling) { // 使えるようになった瞬間に光らせる
+        this.skillBtn.classList.remove('ready-pop');
+        void this.skillBtn.offsetWidth;
+        this.skillBtn.classList.add('ready-pop');
+        navigator.vibrate?.(12);
+      }
+      this.cooling = cooling;
+    }
+    if (cooling) {
+      const n = Math.ceil(seconds);
+      if (this.cdNum.textContent !== String(n)) this.cdNum.textContent = n;
+    }
   }
 
   // コンボ技を出せる間だけ、ジャンプボタンを「掴み」ボタンの見た目に変える

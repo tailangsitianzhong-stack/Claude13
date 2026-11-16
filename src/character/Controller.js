@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { RIG } from './rig.js';
 
 // 速さ・ジャンプの設定（単位は「リグ単位」= キャラの縮尺を掛ける前。身長が約5）
@@ -43,7 +44,7 @@ export const AIR_SLAM = {
 };
 // コンボ技（掴み上げ）。通常攻撃の3段目を当てた直後、ジャンプボタンで出せる
 export const FINISHER = {
-  window: 0.5,      // 3段目の命中からこの秒数だけ受け付ける
+  window: 1.0,      // 3段目の命中からこの秒数だけ受け付ける
   range: 12,        // 相手がこの距離以内なら掴める（リグ単位）
   holdDist: 2.1,    // 掴んでいる間の相手との間隔
   dash: 0.1,        // 相手の目の前まで詰める時間（秒）
@@ -56,14 +57,40 @@ export const FINISHER = {
   throwDist: 3.6,   // 相手を叩きつける地点（自分の真下から前方へ）
   pause: 0.14,      // 相手が地面に当たってから、剣で追撃に入るまでの間
 };
+// スキル1: 剣を振り回して投げ、刺さった相手を引き寄せ、両手で連打し、剣を引き抜いて蹴り飛ばす（全体で約5秒）
+export const SKILL1 = {
+  cooldown: 6,       // 次に使えるまでの秒数（終わってから数える）
+  range: 45,         // この距離以内の相手を狙う（リグ単位）。いなければ前方へ投げて剣が戻ってくる
+  spin: 0.6,         // 剣を振り回す時間（秒）
+  throwTime: 0.36,   // 投げる動きの長さ
+  release: 0.18,     // そのうち、手を離す瞬間
+  flight: 0.26,      // 剣が相手に届くまでの時間
+  stuck: 0.4,        // 刺さって相手がよろめく間
+  pull: 0.7,         // 手をかざして引き寄せる時間
+  holdDist: 2.7,     // 引き寄せた相手との間隔（拳が届く距離）
+  flurry: 1.7,       // 連打の時間
+  punchRate: 3.7,    // 1秒あたりの左右1往復の回数（= 毎秒 約7発）
+  pullOut: 0.5,      // 剣を引き抜く動きの長さ
+  kick: 0.6,         // 蹴りの動きの長さ
+  kickHit: 0.42,     // そのうち、足が当たる瞬間（0〜1）
+  missDist: 16,      // 相手がいないとき、剣が飛ぶ距離
+  embed: 1.7,        // 刺さった剣の柄が、相手の胸からどれだけ手前にあるか
+};
 export const AIM_ASSIST = { range: 11, angle: 1.1 }; // 近くの相手へ自動で向き直る範囲（リグ単位・ラジアン）
 
 const TWO_PI = Math.PI * 2;
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _c = new THREE.Vector3();
+const _dir = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _X = new THREE.Vector3(1, 0, 0);
+const _Z = new THREE.Vector3(0, 0, 1);
 const angleDiff = (a, b) => { const d = a - b; return d - TWO_PI * Math.round(d / TWO_PI); };
 
 /**
  * キャラの移動・ジャンプと、それに合わせたモーション切り替え。
- * command = { x, z（ワールドでの進みたい向き。長さ0〜1）, run, jump, attack（押している間 true）, toggleStance }
+ * command = { x, z（ワールドでの進みたい向き。長さ0〜1）, run, jump, attack（押している間 true）, skill（押した瞬間）, toggleStance }
  */
 export class CharacterController {
   constructor(character, { bounds } = {}) {
@@ -88,6 +115,9 @@ export class CharacterController {
     this.finisherSlam = false; // 今の叩きつけが掴み技の締めか（威力が上がる）
     this.fin = null;          // 掴み技の進行状況
     this.downTimer = 0;
+    this.skillCooldown = 0;   // スキル1を次に使えるまでの残り秒数
+    this.sk = null;           // スキル1の進行状況
+    this.tether = null;       // 引き寄せ中の光の綱 { from, to }（描画用）
 
     this.target = null;       // 攻撃時に自動で向く相手（Character）
     this.attackIndex = 0;     // 今出している攻撃の番号
@@ -147,6 +177,282 @@ export class CharacterController {
     animator.attackT = 0;
     animator.play('airSlam', 0.06);
     this.events.push({ type: 'airSlamStart', index: 2 });
+  }
+
+  // ============================================================
+  // スキル1: 剣投げ → 引き寄せ → 連打 → 引き抜き → 蹴り
+  // ============================================================
+  startSkill() {
+    const { group, animator, scale: S } = this.c;
+    const v = this.victim;
+    let hasTarget = false;
+    if (v && (v.state === 'ground' || v.state === 'hit')) {
+      const dx = v.c.group.position.x - group.position.x;
+      const dz = v.c.group.position.z - group.position.z;
+      hasTarget = Math.hypot(dx, dz) < SKILL1.range * S;
+    }
+    this.sk = {
+      phase: 'spin', t: 0, hasTarget, released: false, arrived: false, flyT: 0, flyFrom: new THREE.Vector3(),
+      punches: 0, pulled: false, kicked: false, vFrom: new THREE.Vector3(), dirX: Math.sin(group.rotation.y), dirZ: Math.cos(group.rotation.y),
+      home: null, // 剣を手に戻すための元の親と位置
+    };
+    this.state = 'skill';
+    this.vx = this.vz = this.vy = 0;
+    this.attackActive = false;
+    animator.trailOn = false;
+    animator.leanTarget = animator.bankTarget = 0;
+    animator.spin = 0;
+    animator.play('spinUp', 0.16);
+    this.events.push({ type: 'skillStart' });
+  }
+
+  // 相手の胸の位置（ワールド）
+  victimChest(out) {
+    const vg = this.victim.c.group;
+    return out.set(vg.position.x, vg.position.y + 3.3 * this.c.scale, vg.position.z);
+  }
+
+  // 手を離れた剣を、位置 pos に・刃を dir の向きへ向けて置く。roll: 縦回転の角度
+  placeSword(pos, dirX, dirY, dirZ, roll) {
+    const sword = this.c.sword;
+    sword.position.copy(pos);
+    _dir.set(dirX, dirY, dirZ).normalize();
+    sword.quaternion.setFromUnitVectors(_Z, _dir);
+    if (roll) sword.quaternion.multiply(_q.setFromAxisAngle(_X, roll));
+  }
+
+  // 剣を手に戻す
+  returnSword() {
+    const sword = this.c.sword;
+    const h = this.sk.home;
+    if (!h) return;
+    h.parent.add(sword);
+    sword.position.copy(h.position);
+    sword.quaternion.copy(h.quaternion);
+    sword.scale.copy(h.scale);
+    this.sk.home = null;
+  }
+
+  endSkill() {
+    this.returnSword();
+    this.tether = null;
+    this.sk = null;
+    this.state = 'ground';
+    this.skillCooldown = SKILL1.cooldown;
+    const v = this.victim;
+    if (v && v.state === 'held') { v.state = 'ground'; v.c.group.position.y = 0; }
+  }
+
+  updateSkill(dt) {
+    const { group, animator, scale: S, sword } = this.c;
+    const K = SKILL1;
+    const k = this.sk;
+    const v = this.victim;
+    const vg = v ? v.c.group : null;
+    k.t += dt;
+
+    // 狙う向き: 相手がいれば常に相手へ（掴んでいる間も向き合う）
+    if (k.hasTarget) {
+      const dx = vg.position.x - group.position.x;
+      const dz = vg.position.z - group.position.z;
+      const d = Math.hypot(dx, dz) || 1;
+      k.dirX = dx / d;
+      k.dirZ = dz / d;
+      group.rotation.y += angleDiff(Math.atan2(dx, dz), group.rotation.y) * (1 - Math.exp(-16 * dt));
+    }
+
+    // ---- 手を離れた剣の動き ----
+    if (k.released && !k.pulled) {
+      if (!k.arrived) {
+        // 飛んでいる: 縦に回転しながら一直線に
+        k.flyT += dt;
+        const f = Math.min(1, k.flyT / K.flight);
+        if (k.hasTarget) {
+          this.victimChest(_a).addScaledVector(_b.set(k.dirX, 0, k.dirZ), -K.embed * S);
+        } else {
+          _a.copy(k.flyFrom).addScaledVector(_b.set(k.dirX, 0, k.dirZ), K.missDist * S);
+        }
+        _c.lerpVectors(k.flyFrom, _a, f);
+        this.placeSword(_c, k.dirX, 0, k.dirZ, f < 1 ? f * Math.PI * 6 : 0);
+        if (f >= 1) {
+          k.arrived = true;
+          if (k.hasTarget) {
+            // 刺さった
+            k.phase = 'stuck';
+            k.t = 0;
+            v.state = 'held';
+            v.vx = v.vz = v.vy = 0;
+            vg.rotation.y = Math.atan2(-k.dirX, -k.dirZ);
+            v.c.animator.jolt = 0;
+            v.c.animator.play('impaled', 0.06);
+            k.vFrom.copy(vg.position);
+            this.events.push({ type: 'skillStick' });
+          } else {
+            k.phase = 'recall';
+            k.t = 0;
+            k.flyFrom.copy(sword.position);
+          }
+        }
+      } else if (k.hasTarget) {
+        // 刺さっている: 相手の胸に付いて動く（殴られるたびに少し揺れる）
+        const j = v.c.animator.jolt;
+        this.victimChest(_a).addScaledVector(_b.set(k.dirX, 0, k.dirZ), -(K.embed - 0.25 * j) * S);
+        this.placeSword(_a, k.dirX, -0.08 + 0.1 * j, k.dirZ, 0);
+      }
+    }
+
+    switch (k.phase) {
+      case 'spin': {
+        // 剣を頭上で振り回す。だんだん速く
+        const f = Math.min(1, k.t / K.spin);
+        animator.spin += (9 + 34 * f) * dt;
+        animator.trailOn = f > 0.15;
+        if (f >= 1) {
+          k.phase = 'throw';
+          k.t = 0;
+          animator.attackT = 0;
+          animator.play('throwSword', 0.12);
+        }
+        break;
+      }
+      case 'throw':
+      case 'stuck': {
+        if (k.phase === 'throw') {
+          animator.attackT = Math.min(1, k.t / K.throwTime);
+          if (!k.released && k.t >= K.release) {
+            // 手を離す: 剣を手から切り離して、ワールドに置く
+            k.released = true;
+            animator.trailOn = false;
+            k.home = { parent: sword.parent, position: sword.position.clone(), quaternion: sword.quaternion.clone(), scale: sword.scale.clone() };
+            group.parent.attach(sword);
+            k.flyFrom.copy(sword.position);
+            this.events.push({ type: 'skillThrow' });
+          }
+        } else {
+          // よろめいて少し後ずさる
+          const f = Math.min(1, k.t / K.stuck);
+          vg.position.x = k.vFrom.x + k.dirX * 0.9 * S * (1 - (1 - f) * (1 - f));
+          vg.position.z = k.vFrom.z + k.dirZ * 0.9 * S * (1 - (1 - f) * (1 - f));
+          if (f >= 1) {
+            k.phase = 'pull';
+            k.t = 0;
+            k.vFrom.copy(vg.position);
+            animator.attackT = 0;
+            animator.play('beckon', 0.18);
+            v.c.animator.play('dragged', 0.2);
+            this.events.push({ type: 'skillPull' });
+          }
+        }
+        break;
+      }
+      case 'recall': {
+        // 外れた: 剣が回りながら手元へ戻る
+        const f = Math.min(1, k.t / 0.45);
+        this.c.joints.rWrist.getWorldPosition(_a);
+        _c.lerpVectors(k.flyFrom, _a, f * f);
+        this.placeSword(_c, -k.dirX, 0, -k.dirZ, f * Math.PI * 6);
+        if (f >= 1) this.endSkill();
+        break;
+      }
+      case 'pull': {
+        // 手をかざして、剣ごと相手を引き寄せる。最初は手をかざす間があり、そこから加速して手元で減速
+        const f = Math.min(1, k.t / K.pull);
+        animator.attackT = f;
+        const m = Math.max(0, (f - 0.22) / 0.78);
+        const e = m * m * (3 - 2 * m);
+        const toX = group.position.x + k.dirX * K.holdDist * S;
+        const toZ = group.position.z + k.dirZ * K.holdDist * S;
+        vg.position.set(
+          k.vFrom.x + (toX - k.vFrom.x) * e,
+          Math.sin(Math.PI * e) * 1.3 * S, // 宙を引きずられる
+          k.vFrom.z + (toZ - k.vFrom.z) * e,
+        );
+        vg.rotation.x = 0.35 * Math.sin(Math.PI * e); // 胸から引っぱられて前のめり
+        // 光の綱: かざした左手 → 剣の柄
+        this.c.joints.lWrist.getWorldPosition(_a);
+        this.tether = this.tether || { from: new THREE.Vector3(), to: new THREE.Vector3(), power: 0 };
+        this.tether.from.copy(_a);
+        this.tether.to.copy(sword.position);
+        this.tether.power = Math.min(1, f / 0.2) * (f < 0.95 ? 1 : (1 - f) / 0.05);
+        if (f >= 1) {
+          vg.position.y = 0;
+          vg.rotation.x = 0;
+          this.tether = null;
+          k.phase = 'flurry';
+          k.t = 0;
+          k.lastHalf = -1;
+          animator.phase = 0;
+          animator.play('flurry', 0.14);
+          v.c.animator.play('pummeled', 0.12);
+        }
+        break;
+      }
+      case 'flurry': {
+        // 両手で連打。打つたびに相手が弾かれ、2人とも少しずつ前へ押し込む
+        const f = Math.min(1, k.t / K.flurry);
+        const speedUp = 0.75 + 0.5 * f; // だんだん速く
+        animator.phase += TWO_PI * K.punchRate * speedUp * dt;
+        // 拳が伸びきる瞬間（位相が π/2, 3π/2 を通過）で1発
+        const half = Math.floor((animator.phase - Math.PI / 2) / Math.PI);
+        if (half > k.lastHalf && animator.fade >= 1) {
+          k.lastHalf = half;
+          k.punches++;
+          const side = half % 2 === 0 ? 1 : -1; // 左拳が先
+          v.c.animator.jolt = 1;
+          v.c.animator.joltSide = side;
+          this.events.push({ type: 'skillPunch', side, count: k.punches });
+        }
+        const push = 1.1 * S * dt;
+        group.position.x += k.dirX * push;
+        group.position.z += k.dirZ * push;
+        vg.position.x = group.position.x + k.dirX * (K.holdDist + 0.25 * v.c.animator.jolt) * S;
+        vg.position.z = group.position.z + k.dirZ * (K.holdDist + 0.25 * v.c.animator.jolt) * S;
+        if (f >= 1) {
+          k.phase = 'pullOut';
+          k.t = 0;
+          animator.attackT = 0;
+          animator.play('pullOut', 0.16);
+          v.c.animator.play('impaled', 0.2);
+        }
+        break;
+      }
+      case 'pullOut': {
+        const f = Math.min(1, k.t / K.pullOut);
+        animator.attackT = f;
+        if (!k.pulled && f >= 0.55) {
+          // 一気に引き抜く: 剣が手に戻り、相手は前へ引っぱられる
+          k.pulled = true;
+          this.returnSword();
+          v.c.animator.jolt = 1;
+          this.events.push({ type: 'skillPullOut' });
+        }
+        if (f >= 1) {
+          k.phase = 'kick';
+          k.t = 0;
+          animator.attackT = 0;
+          animator.play('kick', 0.14);
+        }
+        break;
+      }
+      case 'kick': {
+        const f = Math.min(1, k.t / K.kick);
+        animator.attackT = f;
+        if (!k.kicked && f >= K.kickHit) {
+          k.kicked = true;
+          v.hit(k.dirX, k.dirZ, 3); // 吹き飛ばす
+          this.events.push({ type: 'skillKick' });
+        }
+        if (f >= 1) this.endSkill();
+        break;
+      }
+    }
+
+    // 闘技場の外へは出ない
+    if (this.bounds && vg && v.state === 'held') {
+      const b = this.bounds;
+      vg.position.x = Math.min(b.maxX - 0.2, Math.max(b.minX + 0.2, vg.position.x));
+      vg.position.z = Math.min(b.maxZ - 0.2, Math.max(b.minZ + 0.2, vg.position.z));
+    }
   }
 
   // ============================================================
@@ -335,6 +641,11 @@ export class CharacterController {
       this.updateFinisher(dt);
       return;
     }
+    this.skillCooldown = Math.max(0, this.skillCooldown - dt);
+    if (this.state === 'skill') {
+      this.updateSkill(dt);
+      return;
+    }
     // コンボ技: 3段目を当てた直後にジャンプを押すと、相手を掴み上げる
     if (cmd.jump && this.finisherWindow > 0 && this.canGrab()) {
       this.startFinisher();
@@ -443,6 +754,8 @@ export class CharacterController {
           this.state = 'crouch';
           this.timer = MOVE.crouchTime;
           animator.play('crouch', 0.07);
+        } else if (cmd.skill && this.c.sword && this.skillCooldown <= 0) {
+          this.startSkill();
         } else if (cmd.attack && this.c.sword) {
           this.startAttack(0, cmd);
         } else if (!moving && speed > 0.4 && (animator.name === 'run' || animator.name === 'brake')) {
@@ -455,7 +768,7 @@ export class CharacterController {
         } else {
           // 立ちへ戻る。攻撃・着地・急停止のあとは、ゆっくり構え直して少し揺り戻す
           const from = animator.name;
-          const recover = from.startsWith('attack') || from === 'land' || from === 'brake' || from === 'hit';
+          const recover = from.startsWith('attack') || from === 'land' || from === 'brake' || from === 'hit' || from === 'kick' || from === 'throwSword';
           animator.play(this.idle, recover ? 0.38 : 0.22, recover);
         }
         break;
