@@ -33,6 +33,7 @@ export class Sparks {
       it.size = size * (0.6 + Math.random() * 0.8);
       it.mesh.material.color.setHSL(hue ?? 0.11 + Math.random() * 0.05, sat, 0.6 + Math.random() * 0.35);
       it.mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+      it.mesh.scale.setScalar(it.size); // 出した直後のコマでも正しい大きさで描く
       it.mesh.visible = true;
     }
   }
