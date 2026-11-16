@@ -4,7 +4,7 @@ import { STATUS_DEFS } from '../character/StatusEffects.js';
 // STATUS_DEFS に追加した状態異常は、そのまま自動でここに出る。
 
 const CSS = `
-#status-hud { position: fixed; top: 34px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; gap: 6px;
+#status-hud { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; gap: 6px;
   pointer-events: none; font: 700 13px/1 system-ui, sans-serif; }
 #status-hud .st { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; border-radius: 999px;
   background: rgba(20, 24, 40, 0.78); color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); border: 2px solid var(--c);

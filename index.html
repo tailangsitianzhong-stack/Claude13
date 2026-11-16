@@ -24,13 +24,21 @@
         opacity: 0; transition: opacity 0.06s, transform 0.06s;
       }
       #combo-prompt.show { opacity: 1; transform: translateX(-50%) scale(1); }
+      #ult-prompt {
+        position: fixed; left: 50%; bottom: 30%; transform: translateX(-50%) scale(0.8); z-index: 5;
+        padding: 7px 20px; border-radius: 999px; background: linear-gradient(#fff59d, #ff9800); color: #5a1a00;
+        font: 900 17px/1.4 system-ui, sans-serif; box-shadow: 0 3px 0 #8a1c10, 0 0 18px 5px rgba(255,160,40,0.8); pointer-events: none;
+        opacity: 0; transition: opacity 0.1s, transform 0.2s;
+      }
+      #ult-prompt.show { opacity: 1; transform: translateX(-50%) scale(1); }
+      #ult-prompt.touch { display: none; }
       #hud.touch ~ #combo-prompt, #combo-prompt.touch { display: none; }
       #boot-error {
         position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 30; padding: 10px 12px;
         background: #b3261e; color: #fff; font: 13px/1.5 system-ui, sans-serif; border-radius: 8px;
       }
       #hud {
-        position: fixed; left: 12px; top: 10px; color: #fff;
+        position: fixed; left: 12px; bottom: 10px; color: #fff;
         font: 13px/1.5 system-ui, sans-serif; text-shadow: 0 1px 2px #0008;
         pointer-events: none;
       }
@@ -48,7 +56,8 @@
       })();
     </script>
     <div id="combo-prompt">Space: 掴み上げ！</div>
-    <div id="hud">WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中で攻撃 = 叩きつけ）　左クリック / J: 攻撃（押し続けで連続斬り）　K / E: スキル1（剣投げ）→ 使用後はスキル3（長押しでため斬り）　L / Q: スキル2（地割れ）→ 使用後はスキル4（突進）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離</div>
+    <div id="ult-prompt">T: 必殺技！</div>
+    <div id="hud">WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中で攻撃 = 叩きつけ）　左クリック / J: 攻撃（押し続けで連続斬り）　T / G: 必殺技（ゲージが満タンのとき）　K / E: スキル1（剣投げ）→ 使用後はスキル3（長押しでため斬り）　L / Q: スキル2（地割れ）→ 使用後はスキル4（突進）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離</div>
     <!-- GitHub Pages などビルドなしの配信でも動くよう、three は同梱ファイルから読む（Vite 使用時は無視される） -->
     <script>
       // iOS Safari は viewport の指定だけでは拡大を止められないので、操作そのものを打ち消す

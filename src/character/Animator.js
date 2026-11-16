@@ -151,6 +151,7 @@ export class Animator {
     this.applyLimbs(p, 'l', 1, j.lShoulder, j.lElbow, j.lHip, j.lKnee, j.lAnkle);
     this.applyLimbs(p, 'r', -1, j.rShoulder, j.rElbow, j.rHip, j.rKnee, j.rAnkle);
     j.rWrist.rotation.set(p.swordTilt, p.swordTwist, p.swordRoll);
+    j.lWrist.rotation.set(p.daggerTilt, 0, 0);
 
     // ---- 接地: 一番低い靴底が地面（ルートの高さ）に来るよう腰を上下させる ----
     j.hips.position.set(p.hipsX, RIG.hipY, 0);

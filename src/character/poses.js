@@ -24,6 +24,7 @@ export const FIELDS = [
   'waistPitch', 'waistYaw', 'waistRoll',
   'neckPitch', 'neckYaw', 'neckRoll',
   'swordTilt', 'swordTwist', 'swordRoll',
+  'daggerTilt',
   ...LIMB.map((f) => 'l' + f),
   ...LIMB.map((f) => 'r' + f),
 ];
@@ -1088,7 +1089,144 @@ function lungeStrike(ctx, o) {
   o.lShoulderSwing = -0.85; o.lShoulderOut = 0.8; o.lElbow = 0.4;
 }
 
+// ============================================================
+// 必殺技のポーズ
+//   小剣を左手で取り出して投げる（ultDraw → ultThrow）
+//   ムービー中は両手剣を持って飛び回る（ultSummon → ultWindup → ultDash → ultFinish、締めは ultLeap → ultDash → ultLand）
+// 剣の向きの目安: 刃の上向き角 = (肩の振り + 肘) − 手首の傾き（0 で水平に前向き）
+// ============================================================
+// 両手で柄を握る: 左右の腕を内側へ寄せて、手を胸の前でそろえる
+function twoHand(o, swing, elbow, pitchUp, inward = 0.5) {
+  o.rShoulderSwing = swing; o.lShoulderSwing = swing;
+  o.rElbow = elbow; o.lElbow = elbow;
+  o.rShoulderOut = -inward * 0.55; o.lShoulderOut = -inward;
+  o.rShoulderTwist = 0.15; o.lShoulderTwist = 0.7;
+  o.swordTilt = swing + elbow - pitchUp;
+}
+
+// 小剣を取り出す（attackT 0→1）: 左手を腰の後ろへ回し（0）、すっと引き抜いて胸の前に構える（1）
+const ULT_DRAW = [
+  { t: 0, pose: (o) => {
+    o.hipsYaw = 0.25; o.waistYaw = 0.4; o.neckYaw = -0.3; o.waistPitch = 0.05;
+    o.lHipSwing = 0.3; o.lKnee = 0.4; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.2; o.rKnee = 0.4; o.rHipOut = 0.16; o.rFlat = 1;
+    o.lShoulderSwing = -0.75; o.lShoulderOut = 0.45; o.lElbow = 0.55; o.daggerTilt = -0.2;
+    o.rShoulderSwing = 0.1; o.rShoulderOut = 0.2; o.rElbow = 0.3; o.swordTilt = 1.0;
+  } },
+  { t: 0.45, ease: 'out', pose: (o) => { // 引き抜く: 腕が大きく弧を描いて上がる
+    o.hipsYaw = 0.1; o.waistYaw = 0.1; o.neckYaw = 0.1; o.waistPitch = 0.0;
+    o.lHipSwing = 0.35; o.lKnee = 0.45; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.2; o.rKnee = 0.4; o.rHipOut = 0.16; o.rFlat = 1;
+    o.lShoulderSwing = 0.9; o.lShoulderOut = 0.7; o.lElbow = 1.6; o.daggerTilt = 2.5;
+    o.rShoulderSwing = 0.1; o.rShoulderOut = 0.2; o.rElbow = 0.3; o.swordTilt = 1.0;
+  } },
+  { t: 1, ease: 'inout', pose: (o) => { // 小剣を顔の前にかざす
+    o.hipsYaw = -0.25; o.waistYaw = -0.35; o.neckYaw = 0.5; o.waistPitch = 0.1;
+    o.lHipSwing = 0.5; o.lKnee = 0.6; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.3; o.rKnee = 0.4; o.rHipOut = 0.16; o.rFlat = 0.8;
+    o.lShoulderSwing = 1.2; o.lShoulderOut = -0.2; o.lShoulderTwist = 0.4; o.lElbow = 1.5; o.daggerTilt = 2.7 - 0.6;
+    o.rShoulderSwing = 0.1; o.rShoulderOut = 0.2; o.rElbow = 0.3; o.swordTilt = 1.0;
+  } },
+];
+const ultDraw = (ctx, o) => keyed(ctx.attackT, ULT_DRAW, o);
+
+// 小剣を投げる（attackT 0→1）: 振りかぶり（0）→ 手を離す（0.5）→ 振り抜き（1）
+const ULT_THROW = [
+  { t: 0, pose: (o) => {
+    o.hipsYaw = -0.4; o.waistYaw = -0.7; o.neckYaw = 0.95; o.waistPitch = -0.1;
+    o.lHipSwing = 0.5; o.lKnee = 0.6; o.lHipOut = 0.14; o.lFlat = 1;
+    o.rHipSwing = -0.35; o.rKnee = 0.55; o.rHipOut = 0.16; o.rFlat = 0.6;
+    o.lShoulderSwing = 2.2; o.lShoulderOut = 0.5; o.lElbow = 1.7; o.daggerTilt = 3.9 - 0.2;
+    o.rShoulderSwing = 0.5; o.rShoulderOut = 0.5; o.rElbow = 0.5; o.swordTilt = 1.0;
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => {
+    o.hipsYaw = 0.2; o.waistYaw = 0.45; o.neckYaw = -0.5; o.waistPitch = 0.3; o.hipsPitch = 0.08;
+    o.lHipSwing = 0.8; o.lKnee = 0.8; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.55; o.rKnee = 0.35; o.rHipOut = 0.12; o.rFlat = 0.25;
+    o.lShoulderSwing = 1.55; o.lShoulderOut = 0.0; o.lElbow = 0.1; o.daggerTilt = 1.65;
+    o.rShoulderSwing = -0.4; o.rShoulderOut = 0.6; o.rElbow = 0.6; o.swordTilt = 1.0;
+  } },
+  { t: 1, ease: 'out', pose: (o) => {
+    o.hipsYaw = 0.3; o.waistYaw = 0.6; o.neckYaw = -0.7; o.waistPitch = 0.4; o.hipsPitch = 0.1;
+    o.lHipSwing = 0.85; o.lKnee = 0.9; o.lHipOut = 0.1; o.lFlat = 1;
+    o.rHipSwing = -0.5; o.rKnee = 0.4; o.rHipOut = 0.12; o.rFlat = 0.3;
+    o.lShoulderSwing = 1.2; o.lShoulderOut = -0.35; o.lElbow = 0.1; o.daggerTilt = 1.3;
+    o.rShoulderSwing = -0.35; o.rShoulderOut = 0.6; o.rElbow = 0.6; o.swordTilt = 1.0;
+  } },
+];
+const ultThrow = (ctx, o) => keyed(ctx.attackT, ULT_THROW, o);
+
+// 両手剣を構える（attackT 0→1）: 腰の前に下げた状態（0）から、肩の前へ立てて構える（1）
+const ULT_SUMMON = [
+  { t: 0, pose: (o) => {
+    o.waistPitch = 0.1; o.neckPitch = -0.1;
+    o.lHipSwing = 0.35; o.lKnee = 0.5; o.lHipOut = 0.16; o.lFlat = 1;
+    o.rHipSwing = -0.15; o.rKnee = 0.45; o.rHipOut = 0.16; o.rFlat = 1;
+    twoHand(o, 0.7, 0.8, -0.9, 0.45);
+  } },
+  { t: 0.55, ease: 'out', pose: (o) => { // 一気に掲げる
+    o.waistPitch = -0.12; o.neckPitch = 0.2;
+    o.lHipSwing = 0.4; o.lKnee = 0.6; o.lHipOut = 0.18; o.lFlat = 1;
+    o.rHipSwing = -0.2; o.rKnee = 0.5; o.rHipOut = 0.18; o.rFlat = 1;
+    twoHand(o, 2.0, 0.9, 1.35, 0.5);
+  } },
+  { t: 1, ease: 'inout', pose: (o) => { // 肩の前に立てて、ためる
+    o.hipsYaw = -0.2; o.waistYaw = -0.25; o.neckYaw = 0.35; o.waistPitch = 0.08; o.neckPitch = 0.05;
+    o.lHipSwing = 0.5; o.lKnee = 0.7; o.lHipOut = 0.18; o.lFlat = 1;
+    o.rHipSwing = -0.3; o.rKnee = 0.55; o.rHipOut = 0.2; o.rFlat = 0.9;
+    twoHand(o, 1.3, 1.25, 1.05, 0.5);
+  } },
+];
+const ultSummon = (ctx, o) => keyed(ctx.attackT, ULT_SUMMON, o);
+
+// 飛びかかる直前: 腰を落として、剣を後ろへ引く
+function ultWindup(ctx, o) {
+  o.ground = 0;
+  o.hipsYaw = -0.3; o.waistYaw = -0.55; o.neckYaw = 0.8; o.hipsPitch = 0.2; o.waistPitch = 0.2; o.neckPitch = -0.2;
+  o.lHipSwing = 0.8; o.lKnee = 1.0; o.lHipOut = 0.14; o.lAnkle = -0.3;
+  o.rHipSwing = -0.5; o.rKnee = 0.6; o.rHipOut = 0.16; o.rAnkle = -0.5;
+  twoHand(o, 0.45, 1.05, 0.2, 0.4);
+  o.rShoulderOut = 0.1; o.lShoulderOut = -0.1;
+}
+
+// 飛びかかり: 体を水平に寝かせ、両手で握った剣を先頭に一直線
+function ultDash(ctx, o) {
+  o.ground = 0;
+  o.hipsPitch = 0.75; o.waistPitch = 0.3; o.neckPitch = -0.55;
+  o.lHipSwing = -0.7; o.lKnee = 0.3; o.lHipOut = 0.1; o.lAnkle = -0.6;
+  o.rHipSwing = -0.95; o.rKnee = 0.15; o.rHipOut = 0.1; o.rAnkle = -0.7;
+  twoHand(o, 1.85, 0.12, 1.1, 0.18); // 体が前へ倒れている分（約1.05）を足して、刃を進行方向へ向ける
+}
+
+// 斬り抜けたあと: 空中で体を起こし、剣を振り抜いた形で止まる
+function ultFinish(ctx, o) {
+  o.ground = 0;
+  o.hipsYaw = 0.3; o.waistYaw = 0.55; o.neckYaw = -0.8; o.hipsPitch = 0.1; o.waistPitch = 0.25;
+  o.lHipSwing = 0.5; o.lKnee = 0.9; o.lHipOut = 0.12; o.lAnkle = -0.4;
+  o.rHipSwing = -0.3; o.rKnee = 0.5; o.rHipOut = 0.14; o.rAnkle = -0.5;
+  twoHand(o, 0.65, 0.5, -0.25, 0.3);
+  o.rShoulderOut = 0.5; o.lShoulderOut = 0.2;
+}
+
+// 跳び上がって、剣を頭上へ振りかぶる
+function ultLeap(ctx, o) {
+  const t = ctx.time;
+  o.ground = 0;
+  o.waistPitch = -0.3; o.hipsPitch = -0.05; o.neckPitch = 0.3;
+  o.lHipSwing = 0.9; o.lKnee = 1.4; o.lHipOut = 0.1; o.lAnkle = -0.3;
+  o.rHipSwing = 0.3; o.rKnee = 1.5; o.rHipOut = 0.12; o.rAnkle = -0.3;
+  twoHand(o, 2.95, 0.5, 1.15, 0.4);
+  o.rShoulderTwist = 0.2; o.waistRoll = 0.02 * sin(t * 40); // 力がこもって震える
+}
+
+// 着地: 片膝をついて、剣を地面へ突き立てた形
+function ultLand(ctx, o) {
+  kneelOnSword(o);
+  o.hipsPitch = 0.2; o.waistPitch = 0.5; o.neckPitch = 0.4;
+}
+
 export const POSES = {
+  ultDraw, ultThrow, ultSummon, ultWindup, ultDash, ultFinish, ultLeap, ultLand,
   stunned, lungeAim, lungeDash, lungeStrike,
   chargeStance,
   groundStab, stabCharge, stabPull,

@@ -47,6 +47,21 @@ const CSS = `
   display: grid; place-items: center; transition: transform 0.05s, box-shadow 0.05s; }
 #jump-btn.pressed { transform: translateY(3px) scale(0.94); box-shadow: 0 1px 0 rgba(5, 40, 110, 0.6), 0 2px 6px rgba(0, 0, 0, 0.3); }
 #jump-btn svg { width: 54%; height: 54%; }
+/* 必殺技: ゲージがたまると、ジャンプボタンの左に出てくる */
+#ult-btn { position: absolute; width: var(--btn2); height: var(--btn2);
+  right: calc(28px + env(safe-area-inset-right) + var(--btn) + 16px + var(--btn2) + 12px);
+  bottom: calc(26px + env(safe-area-inset-bottom));
+  border-radius: 50%; touch-action: none; box-sizing: border-box; display: grid; place-items: center;
+  border: 4px solid #fff; background: radial-gradient(circle at 50% 35%, #fff59d, #ff9800 55%, #e53935);
+  box-shadow: 0 4px 0 #8a1c10, 0 0 0 5px rgba(255, 214, 80, 0.55), 0 0 22px 8px rgba(255, 150, 30, 0.85);
+  opacity: 0; transform: scale(0.2) rotate(-40deg); pointer-events: none;
+  transition: opacity 0.12s, transform 0.3s cubic-bezier(0.2, 1.7, 0.4, 1); }
+#ult-btn.show { opacity: 1; transform: scale(1) rotate(0); pointer-events: auto; animation: ult-glow 0.45s ease-in-out infinite alternate; }
+#ult-btn.pressed { transform: scale(0.92); }
+#ult-btn svg { width: 66%; height: 66%; }
+@keyframes ult-glow { from { box-shadow: 0 4px 0 #8a1c10, 0 0 0 5px rgba(255, 214, 80, 0.4), 0 0 16px 5px rgba(255, 150, 30, 0.7); }
+  to { box-shadow: 0 4px 0 #8a1c10, 0 0 0 8px rgba(255, 230, 120, 0.7), 0 0 30px 12px rgba(255, 170, 40, 1); } }
+
 /* スキルボタン: ジャンプボタンと同じ大きさ。攻撃ボタンのまわりに並べる */
 .skill-btn { position: absolute; width: var(--btn2); height: var(--btn2);
   border-radius: 50%; pointer-events: auto; touch-action: none; overflow: hidden;
@@ -179,6 +194,16 @@ const SKILL2_SVG = `
   <rect x="30" y="3" width="4" height="7" fill="#7a4a28" stroke="#5a2a00" stroke-width="2"/>
 </svg>`;
 
+// 必殺技のアイコン（交差する2本の剣と、はじける光）
+const ULT_SVG = `
+<svg viewBox="0 0 64 64" aria-hidden="true" stroke-linejoin="round" stroke-linecap="round">
+  <g transform="rotate(45 32 32)"><polygon points="29.5,4 34.5,4 34.5,40 32,46 29.5,40" fill="#fff" stroke="#6a1200" stroke-width="2.4"/>
+    <rect x="23" y="39" width="18" height="5" rx="1" fill="#ffd54f" stroke="#6a1200" stroke-width="2.4"/><rect x="30" y="44" width="4" height="12" fill="#7a4a28" stroke="#6a1200" stroke-width="2"/></g>
+  <g transform="rotate(-45 32 32)"><polygon points="29.5,4 34.5,4 34.5,40 32,46 29.5,40" fill="#fff" stroke="#6a1200" stroke-width="2.4"/>
+    <rect x="23" y="39" width="18" height="5" rx="1" fill="#ffd54f" stroke="#6a1200" stroke-width="2.4"/><rect x="30" y="44" width="4" height="12" fill="#7a4a28" stroke="#6a1200" stroke-width="2"/></g>
+  <polygon points="32,10 35,25 50,22 38,31 46,45 32,37 18,45 26,31 14,22 29,25" fill="#fff59d" stroke="#6a1200" stroke-width="2"/>
+</svg>`;
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -198,6 +223,7 @@ export class TouchControls {
     this.root.className = 'hidden';
     this.root.innerHTML = `
       <div id="stick-zone"><div id="stick-base"><span id="run-label">RUN</span><div id="stick-knob"></div></div></div>
+      <div id="ult-btn" role="button" aria-label="必殺技">${ULT_SVG}</div>
       <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}${GRAB_SVG}</div>
       <div id="skill-btn" class="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}${SKILL3_SVG}<div class="cd-cover"></div><div class="charge-ring"></div><span class="cd-num"></span></div>
       <div id="skill2-btn" class="skill-btn" role="button" aria-label="スキル2">${SKILL2_SVG}${SKILL4_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
@@ -214,6 +240,8 @@ export class TouchControls {
     this.knob = this.root.querySelector('#stick-knob');
     this.btn = this.root.querySelector('#attack-btn');
     this.jumpBtn = this.root.querySelector('#jump-btn');
+    this.ultBtn = this.root.querySelector('#ult-btn');
+    this.ultQueued = false;
     this.skills = ['#skill-btn', '#skill2-btn'].map((sel) => {
       const btn = this.root.querySelector(sel);
       return { btn, num: btn.querySelector('.cd-num'), queued: false, cooling: false, held: false, alt: false, charge: 0 };
@@ -225,6 +253,7 @@ export class TouchControls {
     this.bindButton();
     this.bindJump();
     this.bindSkills();
+    this.bindUlt();
 
     // タッチ操作の端末なら表示。PC でも画面に触れたら表示に切り替える
     if (matchMedia('(pointer: coarse)').matches) this.enable();
@@ -239,6 +268,7 @@ export class TouchControls {
     this.hint.classList.add('touch');
     document.getElementById('hud')?.classList.add('touch');
     document.getElementById('combo-prompt')?.classList.add('touch');
+    document.getElementById('ult-prompt')?.classList.add('touch');
   }
 
   // 画面の短い辺に合わせてスティックとボタンの大きさを決める
@@ -322,6 +352,34 @@ export class TouchControls {
       this.run = mag >= RUN_THRESHOLD;
     }
     this.base.classList.toggle('run', this.run);
+  }
+
+  // 必殺技ボタン: ゲージがたまっている間だけ出す
+  setUltReady(on) {
+    if (this.ultShown === on) return;
+    this.ultShown = on;
+    this.ultBtn.classList.toggle('show', on);
+    if (on) navigator.vibrate?.([20, 40, 20]);
+  }
+
+  takeUlt() {
+    const k = this.ultQueued;
+    this.ultQueued = false;
+    return k;
+  }
+
+  bindUlt() {
+    this.ultBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.ultBtn.setPointerCapture(e.pointerId);
+      this.ultQueued = true;
+      this.ultBtn.classList.add('pressed');
+      navigator.vibrate?.(20);
+    });
+    const end = () => this.ultBtn.classList.remove('pressed');
+    this.ultBtn.addEventListener('pointerup', end);
+    this.ultBtn.addEventListener('pointercancel', end);
+    this.ultBtn.addEventListener('contextmenu', (e) => e.preventDefault());
   }
 
   // スキル i（0 = スキル1, 1 = スキル2）が押されていたら true を返し、押された記録を消す

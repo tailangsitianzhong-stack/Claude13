@@ -19,6 +19,7 @@ const DEFAULTS = {
   face: 'smile',      // 'smile' | 'angry'
   sleeves: 'short',   // 'short'（前腕が肌） | 'long'（手だけ肌）
   sword: true,        // 右手に剣を持つ
+  great: false,       // 最初から両手剣を持つ（確認用。必殺技では途中で持ち替える）
   scale: 0.15,
 };
 
@@ -194,12 +195,40 @@ export function createCharacter(options = {}) {
   // ---- 剣（右手に握らせる）----
   let sword = null;
   let trail = null;
+  let dagger = null;   // 必殺技で左手から取り出す小剣
+  let great = null;    // 必殺技で持つ両手剣
+  let trailGreat = null;
   if (o.sword) {
     sword = createSword();
     sword.position.set(0, -R.hand / 2, 0);
     joints.rWrist.add(sword);
     trail = new SwordTrail(sword);
+
+    dagger = createSword();
+    dagger.scale.setScalar(0.55);
+    dagger.position.set(0, -R.hand / 2, 0);
+    dagger.visible = false;
+    joints.lWrist.add(dagger);
+
+    great = createSword();
+    great.scale.set(1.45, 1.7, 2.15); // 刃は長く・太く。柄も長い
+    great.position.set(0, -R.hand / 2, 0);
+    great.visible = false;
+    joints.rWrist.add(great);
+    trailGreat = new SwordTrail(great);
   }
+  // 今握っている剣（軌跡・オーラはこちらに付ける）
+  let held = sword;
+  let heldTrail = trail;
+  // 装備の切り替え: 'normal'（片手剣） | 'great'（両手剣） | 'none'
+  const equip = (kind) => {
+    if (!sword) return;
+    sword.visible = kind === 'normal';
+    great.visible = kind === 'great';
+    held = kind === 'great' ? great : kind === 'normal' ? sword : null;
+    heldTrail = kind === 'great' ? trailGreat : kind === 'normal' ? trail : null;
+  };
+  if (o.great) equip('great');
 
   const animator = new Animator({ group, joints, soles, scale: o.scale, armed: !!sword });
 
@@ -231,7 +260,7 @@ export function createCharacter(options = {}) {
   let auraLevel = 0;
   let auraTime = 0;
   const update = (dt, onSubstep) => {
-    if (trail && animator.trailOn && !animator.debug) {
+    if (heldTrail && animator.trailOn && !animator.debug) {
       const SUB = 5;
       // 攻撃の進み具合も、前フレームの値から今フレームの値まで等分して進める
       const t1 = animator.attackT;
@@ -240,7 +269,7 @@ export function createCharacter(options = {}) {
         animator.attackT = t0 + ((t1 - t0) * (i + 1)) / SUB;
         animator.update(dt / SUB);
         group.updateWorldMatrix(true, true);
-        trail.sample();
+        heldTrail.sample();
         if (onSubstep) onSubstep();
       }
     } else {
@@ -249,6 +278,7 @@ export function createCharacter(options = {}) {
     }
     lastAttackT = animator.attackT;
     if (trail) trail.update(dt);
+    if (trailGreat) trailGreat.update(dt);
     if (stars.visible) {
       starTime += dt;
       starMeshes.forEach((m, i) => {
@@ -259,12 +289,12 @@ export function createCharacter(options = {}) {
         m.scale.setScalar(0.85 + 0.25 * Math.sin(starTime * 9 + i * 2));
       });
     }
-    if (sword) {
+    if (held) {
       // 斬撃のオーラ: 振りかぶりで灯り、斬っている間は全開、終わるとすっと消える
-      const want = animator.trailOn ? 1 : animator.name === 'chargeStance' ? 0.2 + 0.4 * animator.attackT : animator.name === 'stabCharge' ? 0.55 + 0.45 * animator.attackT : animator.name === 'airSlam' || animator.name === 'throw' || animator.name === 'groundStab' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
+      const want = animator.trailOn ? 1 : animator.name === 'chargeStance' ? 0.2 + 0.4 * animator.attackT : animator.name === 'stabCharge' ? 0.55 + 0.45 * animator.attackT : animator.name === 'ultDash' || animator.name === 'ultWindup' || animator.name === 'ultLeap' ? 1 : animator.name === 'ultSummon' ? 0.3 + 0.7 * animator.attackT : animator.name === 'airSlam' || animator.name === 'throw' || animator.name === 'groundStab' ? 0.8 : animator.name.startsWith('attack') && animator.attackT < 0.75 ? 0.5 : 0;
       auraLevel += (want - auraLevel) * (1 - Math.exp(-(want > auraLevel ? 30 : 9) * dt));
       auraTime += dt;
-      sword.userData.setAura(animator.debug ? (animator.debug.aura ?? 0) : auraLevel, auraTime);
+      held.userData.setAura(animator.debug ? (animator.debug.aura ?? 0) : auraLevel, auraTime);
     }
   };
 
@@ -279,6 +309,10 @@ export function createCharacter(options = {}) {
     status,
     sword,
     trail,
+    dagger,
+    great,
+    trailGreat,
+    equip,
     setFlash,
     parts: { skull, face, hair },
   };

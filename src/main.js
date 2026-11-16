@@ -1,7 +1,11 @@
 import * as THREE from 'three';
 import { createStage } from './stage/Stage.js';
 import { createCharacter } from './character/Character.js';
-import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4 } from './character/Controller.js';
+import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4, ultPath } from './character/Controller.js';
+import { FIGHT, DAMAGE } from './character/Health.js';
+import { FightHud } from './ui/FightHud.js';
+import { CineOverlay } from './cinematic/CineOverlay.js';
+import { UltimateDirector } from './cinematic/UltimateDirector.js';
 import { input } from './input.js';
 import { TouchControls } from './ui/TouchControls.js';
 import { StatusHud } from './ui/StatusHud.js';
@@ -26,7 +30,8 @@ scene.fog = new THREE.Fog(0x87c5ff, 160, 420);
 const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 1000);
 
 // ライト（ロブロックスっぽい明るくフラットな光）
-scene.add(new THREE.HemisphereLight(0xdff1ff, 0x5a7a3a, 1.4));
+const hemi = new THREE.HemisphereLight(0xdff1ff, 0x5a7a3a, 1.4);
+scene.add(hemi);
 const sun = new THREE.DirectionalLight(0xffffff, 1.8);
 sun.position.set(40, 70, 25);
 sun.castShadow = true;
@@ -49,7 +54,7 @@ p2.group.rotation.y = -Math.PI / 2;
 p2.animator.play('fight', 0); // P2 は構えポーズで待機
 scene.add(p1.group, p2.group);
 const characters = [p1, p2];
-for (const c of characters) if (c.trail) scene.add(c.trail.mesh);
+for (const c of characters) { if (c.trail) scene.add(c.trail.mesh); if (c.trailGreat) scene.add(c.trailGreat.mesh); }
 
 // P1 をキーボードで操作。P2 は今のところ立っているだけ（攻撃を受けるとのけぞる）
 const player = new CharacterController(p1, { bounds: stage.bounds });
@@ -63,13 +68,15 @@ const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleSta
 // 三人称の追従カメラ。最初は P1 の真後ろから
 const view = new ThirdPersonCamera(camera, renderer.domElement, { bounds: stage.cameraBounds });
 view.setBehind(p1.group.rotation.y);
-const fx = new CameraFx(camera, () => view.currentDistance);
+const fx = new CameraFx(camera, () => (ultDirector.active ? ultDirector.camDistance : view.currentDistance));
 // 確認用: game.follow = false にすると追従を止め、camera.position と controls.target で自由に置ける
 const controls = { target: new THREE.Vector3() };
 const sparks = new Sparks(scene);
 const impact = new Impact(scene);
 const groundBreak = new GroundBreak(scene, stage.config.colors);
 const groundCracks = new GroundCracks(scene);
+const fightHud = new FightHud();      // HP・必殺技ゲージ・ダメージ数字
+const cineOverlay = new CineOverlay(); // ムービーの黒帯・閃光・タイトル
 let hitStop = 0;   // ヒットストップの残り秒数（命中の瞬間、時間をほぼ止める）
 let flash = 0;     // P2 を白く光らせる残り秒数
 
@@ -79,6 +86,7 @@ const camInverse = new THREE.Quaternion();
 
 const touch = new TouchControls();
 const comboPrompt = document.getElementById('combo-prompt');
+const ultPrompt = document.getElementById('ult-prompt');
 
 function readCommand() {
   let ix = (input.isDown('KeyD', 'ArrowRight') ? 1 : 0) - (input.isDown('KeyA', 'ArrowLeft') ? 1 : 0);
@@ -100,6 +108,7 @@ function readCommand() {
     skill: input.wasPressed('KeyK', 'KeyE') || touch.takeSkill(0),
     skillHold: input.isDown('KeyK', 'KeyE') || touch.skillHeld(0), // スキル3のため（押している間）
     skill2: input.wasPressed('KeyL', 'KeyQ') || touch.takeSkill(1),
+    ult: input.wasPressed('KeyT', 'KeyG') || touch.takeUlt(),
     toggleStance: input.wasPressed('KeyF'),
   };
 }
@@ -124,9 +133,55 @@ function toCameraSpace(character, [x, y, z]) {
 }
 
 // 攻撃の節目ごとのカメラ演出
+// ---- ダメージ・ゲージ・KO ----
+// 技を当てたときは必ずここを通す。HP を減らし、ゲージを溜め、数字を出す
+function dealDamage(amount, at, kind) {
+  if (amount <= 0) return 0;
+  const dealt = dummy.health.damage(amount);
+  if (dealt <= 0) return 0;
+  if (player.state !== 'ult') player.gauge.add(dealt * FIGHT.gaugePerDamage); // 必殺技の最中は溜まらない
+  const where = at ?? v1.set(p2.group.position.x, p2.group.position.y + p2.height * 0.7, p2.group.position.z);
+  fightHud.popDamage(where, dealt, kind ?? (dealt >= 90 ? 'huge' : dealt >= 45 ? 'big' : ''));
+  if (dummy.health.ko) onKO();
+  return dealt;
+}
+
+// スキルを使うたびに、ゲージが少し溜まる
+const GAUGE_ON_USE = new Set(['skillStart', 'skill2Start', 'skill3Start', 'skill4Start', 'finisherGrab', 'airSlamStart']);
+// 当たった瞬間のダメージ（イベントで知らせてくる技）
+const EVENT_DAMAGE = {
+  skillStick: DAMAGE.skill1Stick, skillPunch: DAMAGE.skill1Punch, skillPullOut: DAMAGE.skill1PullOut, skillKick: DAMAGE.skill1Kick,
+  skill4Hit: DAMAGE.skill4, finisherGrip: DAMAGE.finisherGrip, finisherCrash: DAMAGE.finisherCrash,
+};
+
+let ko = null;        // KO 中の進行（{ t }）
+let koPending = false; // 必殺技の最中に HP が 0 になった（ムービーが終わってから KO にする）
+function onKO() {
+  if (ko) return;
+  if (player.state === 'ult') { koPending = true; return; }
+  startKO();
+}
+function startKO() {
+  koPending = false;
+  ko = { t: 0 };
+  dummy.health.invulnerable = true;
+  fightHud.showBanner('K.O.!', 'YOU WIN');
+  hitStop = 0.45;
+  fx.shake(1);
+  fx.zoom(-220);
+  const dx = p2.group.position.x - p1.group.position.x;
+  const dz = p2.group.position.z - p1.group.position.z;
+  if (dummy.state === 'ground' || dummy.state === 'hit' || dummy.state === 'down') dummy.launch(dx, dz, 60, 16);
+  dummy.status.apply('stun', FIGHT.koRefillDelay + 1);
+}
+
 function onAttackEvent(e) {
+  if (player.state !== 'ult' && GAUGE_ON_USE.has(e.type)) player.gauge.add(FIGHT.gaugePerSkill);
+  if (EVENT_DAMAGE[e.type]) dealDamage(EVENT_DAMAGE[e.type]);
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type.startsWith('skill4')) {
+  if (e.type.startsWith('ult')) {
+    ultDirector.onEvent(e);
+  } else if (e.type.startsWith('skill4')) {
     onSkill4Event(e);
   } else if (e.type.startsWith('skill3')) {
     onSkill3Event(e);
@@ -316,6 +371,7 @@ function onDummyEvent(e) {
     sparks.burst(v1, forward, 12, p2.height * 0.07, p2.height * 2.4, 0.25, 0.25);
     fx.shake(0.4);
   } else if (e.type === 'wallSlam') {
+    dealDamage(DAMAGE.wallSlam);
     v1.set(e.x, p2.height * 0.5, e.z);
     impact.flash(v1, p2.height * 2.6, 0.2);
     impact.ring(p2.group.position, p2.height * 2.0, 0.4);
@@ -392,6 +448,7 @@ function updateSkill3(dt, realDt) {
     const hittable = dummy.state === 'ground' || dummy.state === 'hit' || dummy.state === 'down';
     if (hittable && Math.hypot(dx, dz) < sl.radius + 0.36 * p2.height * 0.5) {
       dummy.hit(sl.dx, sl.dz, sl.power);
+      dealDamage(DAMAGE.skill3[sl.power] ?? 35);
       hitStop = sl.strong ? 0.16 : 0.07;
       flash = sl.strong ? 0.14 : 0.08;
       fx.shake(sl.strong ? 0.9 : 0.45);
@@ -489,6 +546,7 @@ function skill2Burst(cx, cz, radius) {
   if (dist > radius || !hittable) return;
   dummy.hit(dist > 1e-4 ? dx : Math.sin(p1.group.rotation.y), dist > 1e-4 ? dz : Math.cos(p1.group.rotation.y), 3);
   dummy.status.apply('stun', SKILL2.stun); // 気絶（状態異常）を付与
+  dealDamage(DAMAGE.skill2);
   hitStop = 0.16;
   flash = 0.14;
   v1.set(p2.group.position.x, p2.height * 0.55, p2.group.position.z);
@@ -551,6 +609,7 @@ function airSlamImpact() {
   const oz = p2.group.position.z - p1.group.position.z;
   const finisher = wasFinisher; // 掴み技の締めは、さらに強く吹き飛ばす
   dummy.hit(ox, oz, finisher ? 3 : 2);
+  dealDamage(finisher ? DAMAGE.finisherSlam : DAMAGE.airSlam);
   hitStop = finisher ? 0.2 : 0.14;
   if (finisher) { fx.shake(0.5); fx.zoom(-80); impact.ring(p2.group.position, radius * 1.2, 0.6); }
   flash = 0.14;
@@ -604,6 +663,7 @@ function checkHit() {
   const power = ATTACKS[player.attackIndex].power;
   const strong = power > 1;
   dummy.hit(dx, dz, power);
+  dealDamage(DAMAGE.attack[player.attackIndex]);
 
   // 手応え: 時間を一瞬止め、画面を揺らし、ぐっと寄る
   hitStop = strong ? 0.13 : 0.07;
@@ -625,8 +685,27 @@ function checkHit() {
   if (strong) impact.ring(p2.group.position, p2.height * 1.3, 0.35);
 }
 
+// ---- 必殺技のムービー演出 ----
+const ultDirector = new UltimateDirector({
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, groundCracks, p1, p2, player, dummy, ultPath,
+  hooks: {
+    hitStop: (sec) => { hitStop = Math.max(hitStop, sec); },
+    flashFoe: (sec) => { flash = Math.max(flash, sec); },
+    damage: (amount, at, kind) => dealDamage(amount, at, kind),
+    // ムービーが終わったら、カメラを自分の背後へ戻す
+    resetCamera: () => {
+      view.pivot.copy(p1.group.position);
+      view.snapped = false;
+      view.setBehind(p1.group.rotation.y);
+      view.zoom = view.zoomTarget = 1;
+      view.followRate = 11;
+      if (koPending) startKO();
+    },
+  },
+});
+
 // デバッグ用
-window.game = { view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
+window.game = { ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -642,6 +721,7 @@ function step(realDt) {
     hitStop -= realDt;
     dt *= 0.03;
   }
+  if (player.ult) dt *= player.ult.timeScale; // 必殺技の締めのため中は、スローモーション
   stage.update(clock.elapsedTime);
 
   player.update(dt, readCommand());
@@ -673,13 +753,29 @@ function step(realDt) {
   for (const e of dummy.events) onDummyEvent(e);
   dummy.events.length = 0;
   statusHud.update(dummy.status);
+  // HP・ゲージの表示と、必殺技ボタン（ゲージがたまると、ジャンプボタンの左に出る）
+  fightHud.update(realDt, camera, player, dummy);
+  const ultReady = player.gauge.full && player.state !== 'ult';
+  touch.setUltReady(ultReady);
+  ultPrompt.classList.toggle('show', ultReady);
+  // KO: しばらくしたら HP が全回復して、再開する
+  if (ko) {
+    ko.t += realDt;
+    if (ko.t >= FIGHT.koRefillDelay) {
+      ko = null;
+      dummy.health.refill();
+      dummy.health.invulnerable = false;
+      dummy.status.clear();
+      fightHud.showBanner('READY', 'FIGHT!');
+    }
+  }
 
   // キャラ同士はすり抜けない（P1 を P2 の外へ押し出す）
   const minDist = 0.36 * (p1.height + p2.height) / 2;
   const sx = p1.group.position.x - p2.group.position.x;
   const sz = p1.group.position.z - p2.group.position.z;
   const sep = Math.hypot(sx, sz);
-  const grappling = player.state === 'finisher' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
+  const grappling = player.state === 'finisher' || player.state === 'ult' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
   if (!grappling && sep < minDist && sep > 1e-6 && p1.group.position.y < p2.height) {
     p1.group.position.x = p2.group.position.x + (sx / sep) * minDist;
     p1.group.position.z = p2.group.position.z + (sz / sep) * minDist;
@@ -703,6 +799,7 @@ function step(realDt) {
   p2.update(dt);
   sparks.update(dt, camera, p1.height * 1.1);
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
+  ultDirector.update(realDt);
   groundBreak.update(realDt);
   groundCracks.update(realDt);
   updateSkill2Charge(realDt);
@@ -712,7 +809,9 @@ function step(realDt) {
   p2.setFlash(flash > 0 ? 1 : 0);
 
   // 追従カメラ。視点を触っていないときだけ、進行方向（攻撃中は狙った方向）の背後へゆっくり回り込む
-  if (window.game.follow) {
+  if (ultDirector.active) {
+    ultDirector.updateCamera(); // 必殺技のムービー中は、カメラワークをディレクターが決める
+  } else if (window.game.follow) {
     // 視点と移動は分離: 歩いても走ってもカメラの向きは変わらない。
     // 攻撃中だけ、狙っている相手が画面に収まるよう背後へゆっくり回り込む（視点を触った直後は回らない）
     const align = player.state === 'skill3' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE }
