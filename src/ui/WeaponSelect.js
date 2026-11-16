@@ -4,10 +4,14 @@ import { WEAPONS, DEFAULT_WEAPON } from '../game/weapons.js';
 // WEAPONS に武器が増えれば、カードが自動で並ぶ。
 
 const CSS = `
-#weapon-select { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+#weapon-select { position: fixed; inset: 0; z-index: 40; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 16px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
   background: radial-gradient(ellipse at 50% 30%, #2a4a8a 0%, #101a38 62%, #060a18 100%); color: #fff; font-family: system-ui, sans-serif;
   padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(14px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-  -webkit-user-select: none; user-select: none; touch-action: none; transition: opacity 0.35s; }
+  -webkit-user-select: none; user-select: none; touch-action: pan-y; transition: opacity 0.35s; }
+/* 画面が低いときは、上下にスライドして全部見られる。中身が少ないときは、真ん中に寄せる（上の余白と下の余白を自動で等しくする） */
+#weapon-select > :first-child { margin-top: auto; }
+#weapon-select > :last-child { margin-bottom: auto; }
+#weapon-select > * { flex-shrink: 0; }
 #weapon-select.out { opacity: 0; pointer-events: none; }
 #weapon-select h1 { margin: 0; font: 900 min(7vw, 36px)/1 system-ui, sans-serif; letter-spacing: 0.3em; text-shadow: 0 0 18px #4fd8ff, 0 3px 0 #04203d; }
 #weapon-select .sub { margin-top: -6px; font-size: 12px; letter-spacing: 0.3em; color: #9fd4ff; }
@@ -87,7 +91,7 @@ export class WeaponSelect {
       el.dataset.id = w.id;
       const stats = Object.entries(w.stats ?? {}).map(([k, n]) => `<span>${STAT_LABELS[k] ?? k}</span><span class="bar">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</span>`).join('');
       el.innerHTML = `<div class="icon">${ICONS[w.id] ?? ''}</div><div class="name">${w.name}</div><div class="desc">${w.desc}</div><div class="stats">${stats}</div>`;
-      el.addEventListener('pointerdown', () => this.select(w.id));
+      el.addEventListener('click', () => this.select(w.id)); // スライドしたときは選ばない（click は、指を動かすと出ない）
       cards.appendChild(el);
     }
     this.select(this.selected);
