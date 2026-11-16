@@ -5,6 +5,14 @@ import { POSES, carrySword, makePose, resetPose, lerpPose, copyPose } from './po
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const tmp = new THREE.Vector3();
 
+// 下半身として扱う項目（移動しながら攻撃するとき、ここだけ歩き・走りのサイクルに置き換える）
+const LOWER = [
+  'hipsX', 'hipsFree', 'lift', 'ground', 'hipsPitch', 'hipsYaw', 'hipsRoll',
+  ...['l', 'r'].flatMap((k) => ['HipSwing', 'HipOut', 'HipTwist', 'Knee', 'Ankle', 'Flat'].map((f) => k + f)),
+];
+const locoWalk = makePose();
+const locoRun = makePose();
+
 /**
  * ポーズの再生係。
  *  - play(name, fade): 今の姿勢から fade 秒かけて次のモーションへなめらかに切り替える
@@ -25,6 +33,10 @@ export class Animator {
     this.leanV = 0;
     this.bankV = 0;
     this.settle = false;
+    this.loco = 0;           // 移動しながらの攻撃: 下半身を歩き・走りのサイクルにする度合い（0〜1、なめらかに変わる）
+    this.locoTarget = 0;     // その目標（コントローラが毎フレーム決める）
+    this.runK = 0;           // 歩き（0）と走り（1）のどちらのサイクルか（なめらかに変わる）
+    this.runTarget = 0;
     this.spin = 0;           // スキル: 剣を振り回した角度
     this.jolt = 0;           // 殴られた直後に 1、すぐ 0 へ戻る（受ける側のポーズ用）
     this.joltSide = 1;       // どちら側から殴られたか（+1 / -1）
@@ -63,12 +75,36 @@ export class Animator {
     resetPose(out);
     POSES[name](this, out);
     if (this.armed) carrySword(name, this, out);
+    if (this.loco > 0.001 && name.startsWith('attack')) this.blendLocomotion(out);
     return out;
+  }
+
+  // 移動しながらの攻撃: 上半身は攻撃の振りのまま、腰から下を歩き・走りのサイクルに置き換える。
+  // 腰の向きが変わる分は、胸で打ち消して、上半身の向きが攻撃モーションで作った向きのまま動かないようにする
+  blendLocomotion(out) {
+    const w = this.loco;
+    resetPose(locoWalk);
+    POSES.walk(this, locoWalk);
+    resetPose(locoRun);
+    POSES.run(this, locoRun);
+    const yaw = out.hipsYaw + out.waistYaw;
+    const pitch = out.hipsPitch + out.waistPitch;
+    const roll = out.hipsRoll + out.waistRoll;
+    for (const f of LOWER) {
+      const target = locoWalk[f] + (locoRun[f] - locoWalk[f]) * this.runK;
+      out[f] += (target - out[f]) * w;
+    }
+    out.waistYaw = yaw - out.hipsYaw;
+    out.waistPitch = pitch - out.hipsPitch;
+    out.waistRoll = roll - out.hipsRoll;
   }
 
   update(dt) {
     this.time += dt;
     this.jolt *= Math.exp(-13 * dt);
+    const wantLoco = this.name.startsWith('attack') ? this.locoTarget : 0;
+    this.loco += (wantLoco - this.loco) * (1 - Math.exp(-14 * dt));
+    this.runK += (this.runTarget - this.runK) * (1 - Math.exp(-9 * dt));
     // 傾きは少し揺れながら目標へ落ち着くバネ（止まった直後に体が揺り戻す）
     const h = Math.min(dt, 0.033);
     this.leanV += ((this.leanTarget - this.lean) * 140 - this.leanV * 15) * h;

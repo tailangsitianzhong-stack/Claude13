@@ -51,6 +51,11 @@ export function createStage(options = {}) {
   const perimeter = 8 * wallMid;
   const S = cfg.stoneScale;
   const step = cfg.stoneStep;
+  const wallInner = half - cfg.wallThickness;               // 壁の内側の面がこれより内へ入らないようにする
+  const OUTWARD = [[0, -1], [1, 0], [0, 1], [-1, 0]];       // 4辺それぞれの、外向きの向き（x, z）
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const corner = new THREE.Vector3();
   for (let d = 0; d < perimeter; d += step) {
     // 周回距離 d → 四角形の外周上の点 (x, z) と向き
     const sideIdx = Math.floor(d / (2 * wallMid));
@@ -68,7 +73,7 @@ export function createStage(options = {}) {
       const sy = r(0.9, 2.0) * S;
       const sz = Math.min(r(1.2, 3) * S, cfg.wallThickness);
       const off = r(-0.6, 0.6) * S; // 壁の厚み方向のズレ
-      stones.push({
+      const stone = {
         pos: new THREE.Vector3(
           x + (angle === 0 ? r(-0.4, 0.4) * S : off),
           y + sy / 2,
@@ -76,7 +81,21 @@ export function createStage(options = {}) {
         ),
         rot: new THREE.Euler(r(-0.2, 0.2), angle + r(-0.35, 0.35), r(-0.2, 0.2)),
         scale: new THREE.Vector3(sx, sy, sz),
-      });
+      };
+      // 傾いた石は、壁の内側（闘技場の中）へ張り出すことがある。内側の面が wallInner より外に来るよう、外へずらす
+      // （キャラやカメラが石にめり込まない）。外向きの法線 n に対する、8つの角の一番内側の位置で判定する
+      q.setFromEuler(stone.rot);
+      m.compose(stone.pos, q, stone.scale);
+      let innermost = Infinity;
+      for (const cx of [-0.5, 0.5]) for (const cy of [-0.5, 0.5]) for (const cz of [-0.5, 0.5]) {
+        corner.set(cx, cy, cz).applyMatrix4(m);
+        innermost = Math.min(innermost, corner.x * OUTWARD[sideIdx][0] + corner.z * OUTWARD[sideIdx][1]);
+      }
+      if (innermost < wallInner) {
+        stone.pos.x += OUTWARD[sideIdx][0] * (wallInner - innermost);
+        stone.pos.z += OUTWARD[sideIdx][1] * (wallInner - innermost);
+      }
+      stones.push(stone);
       y += sy * r(0.55, 0.8); // 下の石と重なるように積む
     }
   }
@@ -84,8 +103,6 @@ export function createStage(options = {}) {
   const stoneMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.95 });
   const walls = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), stoneMat, stones.length);
   walls.name = 'StoneWalls';
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
   const base = new THREE.Color(cfg.colors.stone);
   const c = new THREE.Color();
   stones.forEach((s, k) => {
@@ -113,5 +130,7 @@ export function createStage(options = {}) {
     update() {},
     config: cfg,
     bounds: { minX: -inner, maxX: inner, minZ: -inner, maxZ: inner, floorY: 0 },
+    // カメラが動ける範囲。壁の内側の面（wallInner）のすぐ手前まで。キャラの範囲より広く、壁際でもカメラを引ける
+    cameraBounds: { minX: -(wallInner - 0.4), maxX: wallInner - 0.4, minZ: -(wallInner - 0.4), maxZ: wallInner - 0.4 },
   };
 }

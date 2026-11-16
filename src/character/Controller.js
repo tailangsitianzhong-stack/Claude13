@@ -1145,6 +1145,9 @@ export class CharacterController {
       animator.bankTarget = 0;
     }
     const running = speed > MOVE.walkSpeed * 1.25;
+    // 移動しながらの通常攻撃: 下半身は歩き・走りのサイクルで動かす（足が滑って見えないように）
+    animator.locoTarget = this.state === 'attack' && moving ? 1 : 0;
+    animator.runTarget = running ? 1 : 0;
 
     // 歩き・走りの位相は進んだ距離に比例して進める
     const stride = running ? MOVE.runStride : MOVE.walkStride;

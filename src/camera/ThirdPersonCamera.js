@@ -15,7 +15,7 @@ const angleDiff = (a, b) => { const d = a - b; return d - TWO_PI * Math.round(d 
 export class ThirdPersonCamera {
   constructor(camera, dom, { bounds } = {}) {
     this.camera = camera;
-    this.bounds = bounds;       // カメラが石壁にめり込まないよう、この範囲内に収める
+    this.bounds = bounds;       // カメラが動ける範囲（壁の内側の面のすぐ手前まで）。はみ出すときは腕を縮める
     this.yaw = 0;               // カメラがキャラのどちら側にいるか（0 = +Z 側）
     this.pitch = 0.34;          // 見下ろす角度
     this.distance = 1.65;
@@ -106,10 +106,22 @@ export class ThirdPersonCamera {
       this.pivot.z + Math.cos(this.yaw) * cp * distance,
     );
     if (this.bounds) {
+      // 壁にめり込まないよう、注視点から後ろへ伸ばした腕を、範囲の内側までに縮める。
+      // （位置を各軸で切り詰めると、壁際でカメラがキャラの頭の上に押し込まれてしまう）
       const b = this.bounds;
-      const m = 0.3;
-      cam.position.x = Math.min(b.maxX - m, Math.max(b.minX + m, cam.position.x));
-      cam.position.z = Math.min(b.maxZ - m, Math.max(b.minZ + m, cam.position.z));
+      const p = this.pivot;
+      const dx = cam.position.x - p.x;
+      const dz = cam.position.z - p.z;
+      let t = 1;
+      if (cam.position.x > b.maxX && dx > 1e-6) t = Math.min(t, (b.maxX - p.x) / dx);
+      if (cam.position.x < b.minX && dx < -1e-6) t = Math.min(t, (b.minX - p.x) / dx);
+      if (cam.position.z > b.maxZ && dz > 1e-6) t = Math.min(t, (b.maxZ - p.z) / dz);
+      if (cam.position.z < b.minZ && dz < -1e-6) t = Math.min(t, (b.minZ - p.z) / dz);
+      t = Math.max(0.2, t);
+      if (t < 1) cam.position.lerpVectors(p, cam.position, t);
+      // 念のため、範囲の外へは出さない
+      cam.position.x = Math.min(b.maxX, Math.max(b.minX, cam.position.x));
+      cam.position.z = Math.min(b.maxZ, Math.max(b.minZ, cam.position.z));
     }
     cam.position.y = Math.max(0.08, cam.position.y);
     cam.lookAt(this.pivot);

@@ -61,7 +61,7 @@ const statusHud = new StatusHud('P2'); // 相手の状態異常の表示枠
 const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleStance: false };
 
 // 三人称の追従カメラ。最初は P1 の真後ろから
-const view = new ThirdPersonCamera(camera, renderer.domElement, { bounds: stage.bounds });
+const view = new ThirdPersonCamera(camera, renderer.domElement, { bounds: stage.cameraBounds });
 view.setBehind(p1.group.rotation.y);
 const fx = new CameraFx(camera, () => view.currentDistance);
 // 確認用: game.follow = false にすると追従を止め、camera.position と controls.target で自由に置ける
