@@ -713,7 +713,7 @@ function checkHit() {
   }
   const tx = p2.group.position.x;
   const tz = p2.group.position.z;
-  const r = HIT_RADIUS * p2.scale * (bat ? windRadiusScale() : 1);
+  const r = HIT_RADIUS * p2.scale * (bat ? windRadiusScale() : fang ? 2 : 1); // 吸血牙: 斬撃をまとって、範囲は2倍
   const low = Math.min(bladeBase.y, bladeTip.y) < p2.group.position.y + p2.height * 1.05;
   let touching = low && (distToSegmentXZ(tx, tz, bladeBase, bladeTip) < r
     || (hadPrevTip && distToSegmentXZ(tx, tz, prevTip, bladeTip) < r));

@@ -18,9 +18,9 @@ import { RIG } from './rig.js';
 
 // bite: 近接の判定が「噛みつき」（正面の相手が近ければ当たる）。grab: 首に噛みつき、つかんで離さない
 export const FANG_ATTACKS = [
-  { anim: 'attackF1', duration: 0.52, active: [0.4, 0.6], chain: 0.78, lunge: [0.2, 0.46, 12], power: 1, bite: true, reach: 8 },
+  { anim: 'attackF1', duration: 0.52, active: [0.4, 0.6], chain: 0.78, lunge: [0.2, 0.46, 12], power: 1, bite: true, reach: 16 },
   { anim: 'attackF2', duration: 0.5, active: [0.34, 0.62], chain: 0.76, lunge: [0.24, 0.5, 10], power: 1 },
-  { anim: 'attackF3', duration: 1.0, active: [0.4, 0.5], chain: 0.97, lunge: [0.18, 0.4, 12], power: 2, bite: true, grab: true, reach: 8 },
+  { anim: 'attackF3', duration: 1.0, active: [0.4, 0.5], chain: 0.97, lunge: [0.18, 0.4, 12], power: 2, bite: true, grab: true, reach: 16 },
 ];
 export const FANG_AIR = { duration: 0.55, cooldown: 0.7, shots: [0.2, 0.5, 0.8] };
 
@@ -34,20 +34,21 @@ export const FSKILL1 = {
 };
 export const FSKILL2 = {
   cooldown: 8,
-  morph: 0.32,      // 蝙蝠になるまで
-  speed: 135,       // 突進の速さ（リグ単位/秒）
+  morph: 0.1,       // 蝙蝠になるまで（出が早い）
+  speed: 210,       // 突進の速さ（リグ単位/秒）
   maxDist: 80,      // 相手がいなくても進む距離
   range: 80,        // 「前にいる相手」を狙える距離
   hitR: 4.6,        // 巨大蝙蝠が当たる半径
-  revert: 0.4,      // 元の姿に戻るまで
+  revert: 0.18,     // 元の姿に戻るまで
+  after: 0.04,      // 当たってから止まるまで
   launchSpeed: 62, launchUp: 14,
 };
 export const FSKILL3 = {
   clones: 4,
-  burst: 0.55,      // 蝙蝠の大群になって弾けるまで
-  gap: 0.3,         // 分身が順番に攻撃を始める間隔
-  dash: 0.14, slash: 0.4, hold: 0.2,
-  gather: 0.6,      // 蝙蝠になって戻ってくるまで
+  burst: 0.3,       // 蝙蝠の大群になって弾けるまで
+  gap: 0.13,        // 分身が順番に攻撃を始める間隔
+  dash: 0.09, slash: 0.27, hold: 0.06,
+  gather: 0.3,      // 蝙蝠になって戻ってくるまで
   size: 0.55,       // 分身の大きさ（本体に対する倍率）
   range: 90,
 };
@@ -181,7 +182,7 @@ export class FangController extends CharacterController {
     if (this.state !== 'attack' || !v || v.state !== 'held') { this.nb = null; return; }
     const t = this.attackT;
     // 噛みつかれている間は、目の前で動けない。引きちぎられる瞬間にぶるぶる震える
-    this.holdFoe(nb.dir, 1.8, 0.25);
+    this.holdFoe(nb.dir, 1.8, 0.25, Math.min(1, 16 * dt));
     if (t > 0.46 && t < 0.66) v.c.animator.jolt = Math.max(v.c.animator.jolt, 0.5 + 0.5 * Math.sin(t * 90));
     if (!nb.torn && t >= 0.68) {
       nb.torn = true;
@@ -193,12 +194,15 @@ export class FangController extends CharacterController {
   }
 
   // 敵を目の前に保つ
-  holdFoe(dir, dist, jolt = 0.25) {
+  // rate < 1 なら、その割合ずつ目標の位置へ引き寄せる（遠くから噛みつくとき、瞬間移動に見えないように）
+  holdFoe(dir, dist, jolt = 0.25, rate = 1) {
     const v = this.victim;
     const g = this.c.group;
     const S = this.c.scale;
     const vg = v.c.group;
-    vg.position.set(g.position.x + dir.x * (dist + jolt * v.c.animator.jolt) * S, 0, g.position.z + dir.z * (dist + jolt * v.c.animator.jolt) * S);
+    const tx = g.position.x + dir.x * (dist + jolt * v.c.animator.jolt) * S;
+    const tz = g.position.z + dir.z * (dist + jolt * v.c.animator.jolt) * S;
+    vg.position.set(vg.position.x + (tx - vg.position.x) * rate, 0, vg.position.z + (tz - vg.position.z) * rate);
     vg.rotation.y = Math.atan2(-dir.x, -dir.z);
   }
 
@@ -343,7 +347,7 @@ export class FangController extends CharacterController {
       const f = Math.min(1, b.t / K.sweepTime);
       animator.attackT = f;
       animator.trailOn = f > 0.15 && f < 0.75;
-      if (!b.fired && f >= 0.4) { b.fired = true; this.events.push({ type: 'fangShot', k: b.k, kind: 's1', tilt: b.k === 0 ? -0.75 : b.k === 1 ? 0.75 : 0.05 }); }
+      if (!b.fired && f >= 0.4) { b.fired = true; this.events.push({ type: 'fangShot', k: b.k, kind: 's1', tilt: b.k === 0 ? -1.1 : b.k === 1 ? 1.1 : 1.5 }); }
       if (f >= 1) {
         b.k++;
         b.t = 0;
@@ -431,7 +435,7 @@ export class FangController extends CharacterController {
         }
       }
       // 当たったあとも、少し進んで止まる
-      if ((b.hit && b.t > 0.1) || b.dist >= K.maxDist * S || (this.bounds && this.atWall())) {
+      if ((b.hit && b.t > K.after) || b.dist >= K.maxDist * S || (this.bounds && this.atWall())) {
         b.phase = 'revert'; b.t = 0;
         group.visible = true;
         this.bigBat.visible = false;

@@ -123,8 +123,8 @@ export class FangDirector {
     } else if (e.index === 1) {
       // 爪の薙ぎ払い: 右上から左下へ、赤い三日月が走る
       v.set(p1.group.position.x + Math.sin(h) * 0.4, p1.height * 0.72, p1.group.position.z + Math.cos(h) * 0.4);
-      impact.wave(v, h, -0.75, p1.height * 1.25, p1.height * 7.5, 0.3, 'blood');
-      impact.wave(v, h, -0.75 + 0.12, p1.height * 0.9, p1.height * 6.5, 0.26, 'blood');
+      impact.wave(v, h, -0.75, p1.height * 2.5, p1.height * 9, 0.34, 'blood');
+      impact.wave(v, h, -0.75 + 0.12, p1.height * 1.8, p1.height * 8, 0.3, 'blood');
       fx.kick(0.9, -0.5, 0); fx.roll(-1.3); fx.zoom(55);
     } else {
       fx.zoom(70); fx.kick(0, -0.3, 0.7);
@@ -187,7 +187,7 @@ export class FangDirector {
       case 'fangShot': {
         this.clawPos(v);
         const d = this.aimDir(v);
-        this.fireShot(v, d, { tilt: e.tilt, size: 2.1, range: 240, speed: 175, damage: DAMAGE.fangS1, heal: DAMAGE.fangS1Heal, hitR: 3.4, kind: 's1', big: true });
+        this.fireShot(v, d, { tilt: e.tilt, size: 4.4, range: 260, speed: 185, damage: DAMAGE.fangS1, heal: DAMAGE.fangS1Heal, hitR: 8, kind: 's1', big: true });
         impact.flash(v, p1.height * 0.9, 0.12);
         sparks.burst(v, d, 6, p1.height * 0.04, p1.height * 2.6, ...BLOOD);
         fx.shake(0.25); fx.zoom(60); fx.kick(e.k === 1 ? -0.5 : 0.5, 0, 0.4);

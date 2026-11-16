@@ -3,7 +3,8 @@ import * as THREE from 'three';
 // 「吸血牙」のモデル: 両手の爪、口の牙、必殺技の赤い宝石。箱と円錐だけの低コスト版。
 // 爪: 握りの中心が原点、先は +Z へ伸びる（剣・バットと同じ向き）。右手の爪が「武器」（当たり判定・軌跡）。
 export const CLAW = {
-  length: 2.6,     // 先端まで（リグ単位）
+  length: 2.6,     // 爪の長さ（リグ単位）
+  aura: 7.2,       // 斬撃のオーラの長さ（爪の先から、さらに前へ）。攻撃の当たり判定も、ここまで伸びる
   hitFrom: 0.5,    // 当たり判定: 根元〜先端
 };
 
@@ -33,6 +34,14 @@ export function createClaws(size = 1) {
     g.add(cone);
     claws.push(cone);
   }
+  // 斬撃のオーラ: 爪の先から長くのびる赤い光の刃（攻撃中だけ光る）
+  const auraMat = new THREE.MeshBasicMaterial({ color: 0xff2a44, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+  const auraMesh = new THREE.Mesh(new THREE.OctahedronGeometry(1, 0).scale(0.42, 0.14, 1), auraMat);
+  const AL = CLAW.length + CLAW.aura;
+  auraMesh.scale.set(1, 1, (AL - 0.6) / 2);
+  auraMesh.position.z = 0.6 + (AL - 0.6) / 2;
+  auraMesh.visible = false;
+  g.add(auraMesh);
   g.scale.setScalar(size);
 
   let red = 0;
@@ -48,10 +57,15 @@ export function createClaws(size = 1) {
   g.userData.setRed = (k) => { red = Math.min(1, Math.max(0, k)); apply(); };
   g.userData.getRed = () => red;
   // 剣と同じ口 (Character が毎フレーム呼ぶ): 振っている間は、爪が赤く光る
-  g.userData.setAura = (level, time) => { glow = level * 0.6; apply(time); };
+  g.userData.setAura = (level, time) => {
+    glow = level * 0.6;
+    apply(time);
+    auraMesh.visible = level > 0.04;
+    auraMat.opacity = Math.min(0.75, level * 0.75) * (0.8 + 0.2 * Math.sin(time * 40));
+  };
   g.userData.base = new THREE.Vector3(0, 0, CLAW.hitFrom * size);
-  g.userData.tip = new THREE.Vector3(0, 0, (CLAW.length + 0.3) * size);
-  g.userData.trailBase = new THREE.Vector3(0, 0, CLAW.length * 0.45 * size);
+  g.userData.tip = new THREE.Vector3(0, 0, (CLAW.length + CLAW.aura) * size);
+  g.userData.trailBase = new THREE.Vector3(0, 0, CLAW.length * size);
   g.userData.bladeTip = g.userData.tip.clone();
   g.userData.isClaws = true;
   return g;
