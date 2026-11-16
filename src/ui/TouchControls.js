@@ -1,6 +1,6 @@
 // スマホ横画面用の操作UI。
 //  - 左半分: 触れた場所に出るスティック。倒した量で歩く速さが変わり、外周まで倒し切ると走る
-//  - 右下  : 攻撃ボタン（押している間は連続斬り）。その左にジャンプ、真上にスキル1、左斜め上にスキル2、その左にスキル4（いずれも一回り小さい）
+//  - 右下  : 攻撃ボタン（押している間は連続斬り）。その左にジャンプ、真上にスキル1、左斜め上にスキル2（いずれも一回り小さい。使うとスキル3・スキル4に切り替わる）
 // 画面のそれ以外の場所（右上側）をドラッグするとカメラが回る（OrbitControls が担当）。
 
 const RUN_THRESHOLD = 0.92; // これ以上倒すと走る
@@ -59,12 +59,16 @@ const CSS = `
   bottom: calc(26px + env(safe-area-inset-bottom) + var(--btn) + 14px);
   background: radial-gradient(circle at 50% 35%, rgba(190, 120, 255, 0.95), rgba(110, 40, 200, 0.95));
   box-shadow: 0 4px 0 rgba(50, 10, 100, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
-/* スキル1を使ったあと: 同じボタンがスキル3（ため斬り）に変わる。水色になり、押している間は金色の輪でため具合を示す */
-#skill-btn .icon-s3 { display: none; }
-#skill-btn.mode3 { background: radial-gradient(circle at 50% 35%, rgba(120, 235, 255, 0.97), rgba(10, 130, 200, 0.97));
+/* 使ったあとにボタンが切り替わる（スキル1 → スキル3、スキル2 → スキル4）。切り替わっている間は .alt が付く */
+.skill-btn .icon-alt { display: none; }
+.skill-btn.alt .icon-main { display: none; }
+.skill-btn.alt .icon-alt { display: block; }
+/* スキル3: 水色。押している間は金色の輪でため具合を示す */
+#skill-btn.alt { background: radial-gradient(circle at 50% 35%, rgba(120, 235, 255, 0.97), rgba(10, 130, 200, 0.97));
   box-shadow: 0 4px 0 rgba(0, 60, 110, 0.6), 0 0 0 4px rgba(120, 230, 255, 0.4), 0 0 18px 5px rgba(90, 220, 255, 0.7); }
-#skill-btn.mode3 .icon-s1 { display: none; }
-#skill-btn.mode3 .icon-s3 { display: block; }
+/* スキル4: 赤紫 */
+#skill2-btn.alt { background: radial-gradient(circle at 50% 35%, rgba(255, 120, 150, 0.97), rgba(200, 20, 70, 0.97));
+  box-shadow: 0 4px 0 rgba(100, 0, 30, 0.6), 0 0 0 4px rgba(255, 130, 160, 0.4), 0 0 18px 5px rgba(255, 70, 110, 0.7); }
 .skill-btn .charge-ring { grid-area: 1 / 1; width: 100%; height: 100%; border-radius: 50%; display: none;
   background: conic-gradient(#ffd54a calc(var(--charge, 0) * 360deg), rgba(0, 0, 0, 0.35) 0);
   -webkit-mask: radial-gradient(circle, transparent 56%, #000 58%); mask: radial-gradient(circle, transparent 56%, #000 58%); }
@@ -78,11 +82,6 @@ const CSS = `
   bottom: calc(26px + env(safe-area-inset-bottom) + (var(--btn) - var(--btn2)) / 2 + var(--off));
   background: radial-gradient(circle at 50% 35%, rgba(255, 190, 90, 0.95), rgba(190, 95, 15, 0.95));
   box-shadow: 0 4px 0 rgba(95, 45, 0, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
-/* スキル4: スキル2の左隣（同じ高さ） */
-#skill4-btn { right: calc(28px + env(safe-area-inset-right) + (var(--btn) - var(--btn2)) / 2 + (var(--btn) / 2 + var(--btn2) / 2 + 27px) * 0.7071 + var(--btn2) + 8px);
-  bottom: calc(26px + env(safe-area-inset-bottom) + (var(--btn) - var(--btn2)) / 2 + (var(--btn) / 2 + var(--btn2) / 2 + 27px) * 0.7071);
-  background: radial-gradient(circle at 50% 35%, rgba(255, 120, 150, 0.97), rgba(200, 20, 70, 0.97));
-  box-shadow: 0 4px 0 rgba(100, 0, 30, 0.6), 0 6px 14px rgba(0, 0, 0, 0.3); }
 /* 使用中・クールタイム中: 暗くなり、残り時間ぶんの扇形が覆う。残り秒数を表示 */
 .skill-btn.cooling, .skill-btn.busy { filter: saturate(0.35) brightness(0.8); }
 .skill-btn .cd-cover { grid-area: 1 / 1; width: 100%; height: 100%; border-radius: 50%;
@@ -140,7 +139,7 @@ const GRAB_SVG = `
 
 // スキル1のアイコン（回転する剣）
 const SKILL_SVG = `
-<svg class="icon-s1" viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+<svg class="icon-main" viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
   <path d="M10 30 A22 22 0 0 1 50 18" fill="none" stroke="#fff" stroke-width="5"/>
   <polygon points="52,8 55,23 41,19" fill="#fff"/>
   <path d="M54 34 A22 22 0 0 1 14 46" fill="none" stroke="#fff" stroke-width="5"/>
@@ -154,7 +153,7 @@ const SKILL_SVG = `
 
 // スキル3のアイコン（3つ並んで飛ぶ三日月の斬撃）
 const SKILL3_SVG = `
-<svg class="icon-s3" viewBox="0 0 64 64" aria-hidden="true" stroke-linejoin="round">
+<svg class="icon-alt" viewBox="0 0 64 64" aria-hidden="true" stroke-linejoin="round">
   <path d="M10 8 Q34 32 10 56 Q22 32 10 8 Z" fill="#fff" stroke="#00406b" stroke-width="2.5"/>
   <path d="M26 8 Q50 32 26 56 Q38 32 26 8 Z" fill="#fff" stroke="#00406b" stroke-width="2.5"/>
   <path d="M42 8 Q66 32 42 56 Q54 32 42 8 Z" fill="#fff" stroke="#00406b" stroke-width="2.5"/>
@@ -162,7 +161,7 @@ const SKILL3_SVG = `
 
 // スキル4のアイコン（剣を前へ向けて突っ込む。後ろへ流れる速度線）
 const SKILL4_SVG = `
-<svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+<svg class="icon-alt" viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
   <path d="M4 22 H24 M2 32 H20 M4 42 H24" fill="none" stroke="#fff" stroke-width="4" opacity="0.9"/>
   <polygon points="26,28 52,28 62,32 52,36 26,36" fill="#f2f5f8" stroke="#5a0a25" stroke-width="2.2"/>
   <rect x="22" y="23" width="5" height="18" rx="1" fill="#ffe08a" stroke="#5a0a25" stroke-width="2"/>
@@ -171,7 +170,7 @@ const SKILL4_SVG = `
 
 // スキル2のアイコン（地面に突き刺した剣と、広がるひび）
 const SKILL2_SVG = `
-<svg viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
+<svg class="icon-main" viewBox="0 0 64 64" aria-hidden="true" stroke-linecap="round" stroke-linejoin="round">
   <polyline points="4,46 16,44 24,48 32,45" fill="none" stroke="#fff" stroke-width="4"/>
   <polyline points="32,45 40,49 48,44 60,47" fill="none" stroke="#fff" stroke-width="4"/>
   <polyline points="20,58 26,52 32,46 39,53 45,59" fill="none" stroke="#fff" stroke-width="4"/>
@@ -201,8 +200,7 @@ export class TouchControls {
       <div id="stick-zone"><div id="stick-base"><span id="run-label">RUN</span><div id="stick-knob"></div></div></div>
       <div id="jump-btn" role="button" aria-label="ジャンプ">${JUMP_SVG}${GRAB_SVG}</div>
       <div id="skill-btn" class="skill-btn" role="button" aria-label="スキル1">${SKILL_SVG}${SKILL3_SVG}<div class="cd-cover"></div><div class="charge-ring"></div><span class="cd-num"></span></div>
-      <div id="skill2-btn" class="skill-btn" role="button" aria-label="スキル2">${SKILL2_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
-      <div id="skill4-btn" class="skill-btn" role="button" aria-label="スキル4">${SKILL4_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
+      <div id="skill2-btn" class="skill-btn" role="button" aria-label="スキル2">${SKILL2_SVG}${SKILL4_SVG}<div class="cd-cover"></div><span class="cd-num"></span></div>
       <div id="attack-btn" role="button" aria-label="攻撃">${SWORD_SVG}</div>`;
     document.body.appendChild(this.root);
 
@@ -216,9 +214,9 @@ export class TouchControls {
     this.knob = this.root.querySelector('#stick-knob');
     this.btn = this.root.querySelector('#attack-btn');
     this.jumpBtn = this.root.querySelector('#jump-btn');
-    this.skills = ['#skill-btn', '#skill2-btn', '#skill4-btn'].map((sel) => {
+    this.skills = ['#skill-btn', '#skill2-btn'].map((sel) => {
       const btn = this.root.querySelector(sel);
-      return { btn, num: btn.querySelector('.cd-num'), queued: false, cooling: false, held: false, mode: 'skill1', charge: 0 };
+      return { btn, num: btn.querySelector('.cd-num'), queued: false, cooling: false, held: false, alt: false, charge: 0 };
     });
 
     this.resize();
@@ -338,14 +336,14 @@ export class TouchControls {
     return this.skills[i].held;
   }
 
-  // スキル i のボタンの見た目を切り替える（'skill1' | 'skill3'）
-  setSkillMode(i, mode) {
+  // スキル i のボタンを、切り替わったあとの姿にする（0: スキル1 → スキル3、1: スキル2 → スキル4）
+  setSkillAlt(i, alt) {
     const sk = this.skills[i];
-    if (sk.mode === mode) return;
-    sk.mode = mode;
-    sk.btn.classList.toggle('mode3', mode === 'skill3');
-    sk.btn.setAttribute('aria-label', mode === 'skill3' ? 'スキル3' : 'スキル1');
-    if (mode === 'skill3') { // 変わった瞬間に光らせる
+    if (sk.alt === alt) return;
+    sk.alt = alt;
+    sk.btn.classList.toggle('alt', alt);
+    sk.btn.setAttribute('aria-label', ['スキル1', 'スキル2'][i].replace(/\d/, (n) => (alt ? +n + 2 : n)));
+    if (alt) { // 変わった瞬間に光らせる
       sk.btn.classList.remove('ready-pop');
       void sk.btn.offsetWidth;
       sk.btn.classList.add('ready-pop');

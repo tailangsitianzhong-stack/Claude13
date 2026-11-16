@@ -90,9 +90,9 @@ export const SKILL2 = {
   reach: 2.0,        // 範囲の中心はキャラの前方これだけ先（剣を刺した位置）
   stun: 4,           // 当てた相手に付ける気絶の秒数（吹き飛んでいる間も含む）
 };
-// スキル4: 剣を前へ向けて一瞬で飛びかかり、相手を遠くまで吹き飛ばす
+// スキル4: スキル2を使ったあと、同じボタンがこれに変わる（使うとスキル2に戻る）。
+// 剣を前へ向けて一瞬で飛びかかり、相手を遠くまで吹き飛ばす
 export const SKILL4 = {
-  cooldown: 7,       // 次に使えるまでの秒数（終わってから数える）
   aim: 0.28,         // 剣を前へ向けて構え、ためる時間（秒）
   dash: 0.09,        // 飛びかかる時間（ほぼ一瞬）
   hold: 0.34,        // 突きの姿勢で止まる時間
@@ -127,7 +127,7 @@ const SHOTS = [
 
 const TWO_PI = Math.PI * 2;
 // 気絶中は何も入力できない
-const STUN_CMD = { x: 0, z: 0, run: false, jump: false, attack: false, skill: false, skillHold: false, skill2: false, skill4: false, toggleStance: false };
+const STUN_CMD = { x: 0, z: 0, run: false, jump: false, attack: false, skill: false, skillHold: false, skill2: false, toggleStance: false };
 const _a = new THREE.Vector3();
 const _b = new THREE.Vector3();
 const _c = new THREE.Vector3();
@@ -168,7 +168,7 @@ export class CharacterController {
     this.sk = null;           // スキル1の進行状況
     this.tether = null;       // 引き寄せ中の光の綱 { from, to }（描画用）
     this.skill2Cooldown = 0;  // スキル2を次に使えるまでの残り秒数
-    this.skill4Cooldown = 0;  // スキル4を次に使えるまでの残り秒数
+    this.skill4Ready = false; // スキル2のボタンがスキル4に変わっているか（スキル2を使い終えると true）
     this.s4 = null;           // スキル4の進行状況
     this.status = character.status; // 状態異常（気絶など）
     this.skill3Ready = false; // スキル1のボタンがスキル3に変わっているか（スキル1を使うと true）
@@ -195,9 +195,10 @@ export class CharacterController {
     animator.attackT = 0;
     animator.play(ATTACKS[index].anim, index === 0 ? 0.08 : 0.1);
 
-    // 向き: 入力があればその方向、なければ今の向き。近くに相手がいればそちらを優先
-    this.aimYaw = Math.hypot(cmd.x, cmd.z) > 0.01 ? Math.atan2(cmd.x, cmd.z) : group.rotation.y;
-    if (this.target) {
+    // 向き: 移動しながらのときは、今キャラが向いている方向で斬る（向きを変えたり、相手へ吸い付いたりしない）。
+    // 止まっているときだけ、近くに相手がいればそちらを優先して向き直る
+    this.aimYaw = group.rotation.y;
+    if (Math.hypot(cmd.x, cmd.z) <= 0.01 && this.target) {
       const dx = this.target.group.position.x - group.position.x;
       const dz = this.target.group.position.z - group.position.z;
       const yaw = Math.atan2(dx, dz);
@@ -264,7 +265,7 @@ export class CharacterController {
     this.vx = (dx / len) * speed * S;
     this.vz = (dz / len) * speed * S;
     this.vy = up * S;
-    if (this.s4) { this.s4 = null; this.skill4Cooldown = SKILL4.cooldown; }
+    if (this.s4) { this.s4 = null; this.skill4Ready = false; }
     if (this.s3) { this.s3 = null; this.skill3Ready = false; }
     if (this.s2) { this.s2 = null; this.skill2Cooldown = SKILL2.cooldown; this.events.push({ type: 'skill2Cancel' }); }
     this.state = 'launched';
@@ -401,7 +402,7 @@ export class CharacterController {
       if (k.t >= K.recover) {
         this.s4 = null;
         this.state = 'ground';
-        this.skill4Cooldown = K.cooldown;
+        this.skill4Ready = false; // スキル2のボタンに戻る（クールタイムはスキル2を使い終えたときから進んでいる）
       }
     }
   }
@@ -543,6 +544,7 @@ export class CharacterController {
         this.s2 = null;
         this.state = 'ground';
         this.skill2Cooldown = K.cooldown;
+        this.skill4Ready = true; // スキル2を使い終えたので、ボタンがスキル4に変わる
       }
     }
   }
@@ -976,7 +978,7 @@ export class CharacterController {
     this.vz = (dz / len) * speed;
     this.vy = 0;
     group.position.y = 0;
-    if (this.s4) { this.s4 = null; this.skill4Cooldown = SKILL4.cooldown; }
+    if (this.s4) { this.s4 = null; this.skill4Ready = false; }
     if (this.s3) { this.s3 = null; this.skill3Ready = false; }
     if (this.s2) { this.s2 = null; this.skill2Cooldown = SKILL2.cooldown; this.events.push({ type: 'skill2Cancel' }); }
     this.state = 'hit';
@@ -1043,7 +1045,6 @@ export class CharacterController {
       this.updateSkill3(dt, cmd);
       return;
     }
-    this.skill4Cooldown = Math.max(0, this.skill4Cooldown - dt);
     if (this.state === 'skill4') {
       this.updateSkill4(dt);
       return;
@@ -1062,7 +1063,7 @@ export class CharacterController {
     this.prevAttack = cmd.attack;
 
     // ---- 水平移動 ----
-    const control = this.state === 'air' ? MOVE.airControl : this.state === 'ground' ? 1 : 0.5;
+    const control = this.state === 'air' ? MOVE.airControl : this.state === 'ground' || (this.state === 'attack' && moving) ? 1 : 0.5;
     let tx = moving ? cmd.x * topSpeed : 0;
     let tz = moving ? cmd.z * topSpeed : 0;
     const braking = !moving && animator.name === 'brake';
@@ -1070,8 +1071,9 @@ export class CharacterController {
     const pvx = this.vx;
     const pvz = this.vz;
     const pYaw = group.rotation.y;
-    if (this.state === 'attack') {
-      // 攻撃中は歩けない。踏み込みの区間だけ、向いている方へ進む
+    if (this.state === 'attack' && !moving) {
+      // 止まって攻撃しているときだけ、踏み込みの区間で向いている方へ進む
+      // （移動入力があるときは止まらず、そのまま歩き・走りの速さで動き続ける）
       const [from, to, lungeSpeed] = ATTACKS[this.attackIndex].lunge;
       let v = this.attackT >= from && this.attackT <= to ? lungeSpeed * S : 0;
       // 正面に相手がいるときは、剣がちょうど届く間合いまで詰めて止まる（体が重ならない・空振りしにくい）
@@ -1119,7 +1121,7 @@ export class CharacterController {
     }
 
     // 進む向きへなめらかに振り向く（攻撃中は振りかぶりの間だけ、狙った向きへ素早く）
-    if (this.state === 'attack') {
+    if (this.state === 'attack' && !moving) {
       if (this.attackT < ATTACKS[this.attackIndex].active[0]) {
         group.rotation.y += angleDiff(this.aimYaw, group.rotation.y) * (1 - Math.exp(-MOVE.turnRate * 2 * dt));
       }
@@ -1162,7 +1164,7 @@ export class CharacterController {
           this.startSkill3();
         } else if (cmd.skill && this.c.sword && this.skillCooldown <= 0) {
           this.startSkill();
-        } else if (cmd.skill4 && this.c.sword && this.skill4Cooldown <= 0) {
+        } else if (cmd.skill2 && this.c.sword && this.skill4Ready) {
           this.startSkill4();
         } else if (cmd.skill2 && this.c.sword && this.skill2Cooldown <= 0) {
           this.startSkill2();

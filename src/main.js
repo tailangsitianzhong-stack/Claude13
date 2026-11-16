@@ -100,7 +100,6 @@ function readCommand() {
     skill: input.wasPressed('KeyK', 'KeyE') || touch.takeSkill(0),
     skillHold: input.isDown('KeyK', 'KeyE') || touch.skillHeld(0), // スキル3のため（押している間）
     skill2: input.wasPressed('KeyL', 'KeyQ') || touch.takeSkill(1),
-    skill4: input.wasPressed('KeyR', 'KeyU') || touch.takeSkill(2),
     toggleStance: input.wasPressed('KeyF'),
   };
 }
@@ -652,7 +651,7 @@ function step(realDt) {
   const canFinish = player.finisherWindow > 0 && player.canGrab();
   touch.setSpecial(canFinish);
   // スキル1のボタン: スキル1を使ったあとはスキル3に変わる（ため中は、ため具合を表示）
-  touch.setSkillMode(0, player.skill3Ready || player.state === 'skill3' ? 'skill3' : 'skill1');
+  touch.setSkillAlt(0, player.skill3Ready || player.state === 'skill3');
   if (player.skill3Ready || player.state === 'skill3') {
     touch.setSkillCooldown(0, 0, 0, player.s3 !== null && player.s3.phase === 'release');
     touch.setSkillCharge(0, player.s3 && player.s3.phase === 'charge' ? player.s3.charge : 0);
@@ -660,8 +659,13 @@ function step(realDt) {
     touch.setSkillCooldown(0, player.skillCooldown / SKILL1.cooldown, player.skillCooldown, player.state === 'skill');
     touch.setSkillCharge(0, 0);
   }
-  touch.setSkillCooldown(1, player.skill2Cooldown / SKILL2.cooldown, player.skill2Cooldown, player.state === 'skill2');
-  touch.setSkillCooldown(2, player.skill4Cooldown / SKILL4.cooldown, player.skill4Cooldown, player.state === 'skill4');
+  // スキル2のボタン: スキル2を使い終えるとスキル4に変わる（使うとスキル2に戻り、クールタイムの残りを表示）
+  touch.setSkillAlt(1, player.skill4Ready || player.state === 'skill4');
+  if (player.skill4Ready || player.state === 'skill4') {
+    touch.setSkillCooldown(1, 0, 0, player.state === 'skill4');
+  } else {
+    touch.setSkillCooldown(1, player.skill2Cooldown / SKILL2.cooldown, player.skill2Cooldown, player.state === 'skill2');
+  }
   comboPrompt.classList.toggle('show', canFinish);
 
   for (const e of player.events) onAttackEvent(e);
@@ -711,27 +715,22 @@ function step(realDt) {
   if (window.game.follow) {
     // 視点と移動は分離: 歩いても走ってもカメラの向きは変わらない。
     // 攻撃中だけ、狙っている相手が画面に収まるよう背後へゆっくり回り込む（視点を触った直後は回らない）
-    const align = player.state === 'skill3' || player.state === 'skill4' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE }
+    const align = player.state === 'skill3' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE }
       : player.state === 'attack' ? { heading: player.aimYaw, rate: ATTACK_ALIGN_RATE }
-      : player.state === 'skill' ? { heading: p1.group.rotation.y, rate: ATTACK_ALIGN_RATE } : null;
+      : null;
     // コンボ技の間はカメラを引き、高く跳んでも2人が画面に収まるようにする
     const cinematic = player.state === 'finisher' || player.finisherSlam;
-    // スキル1: 投げて引き寄せるまでは少し引き、連打からは近くで見せる
-    const skillPhase = player.sk ? player.sk.phase : null;
-    const skillZoom = !skillPhase ? 1 : (skillPhase === 'flurry' || skillPhase === 'pullOut' || skillPhase === 'kick') ? 1.1 : 1.5;
     // スキル2: 力を込める間はじわっと寄り、解放で大きく引いて範囲全体を見せる
     const s2Zoom = !player.s2 ? 1 : player.s2.phase === 'charge' || player.s2.phase === 'stab' ? 0.85 : 2.0;
     // スキル3: ためるほど寄り、放つときは少し引く
     const s3Zoom = !player.s3 ? 1 : player.s3.phase === 'charge' ? 1 - 0.08 * player.s3.charge : 1.25;
-    // スキル4: 構えでじわっと寄り、飛びかかりで引く。吹き飛んだ相手を追うときは2人が収まる距離まで引く
-    const s4Zoom = !player.s4 ? 1 : player.s4.phase === 'aim' ? 0.88 : 1.2;
-    const chasing = dummy.state === 'launched' || (dummy.state === 'down' && Math.hypot(dummy.vx, dummy.vz) > p2.scale * 3);
-    view.zoomTarget = chasing ? 2.6 : cinematic ? 2.3 : player.s2 ? s2Zoom : player.s3 ? s3Zoom : player.s4 ? s4Zoom : skillZoom;
+    // スキル1・スキル4: カメラは相手の方へ寄せたり動かしたりしない（ズームもしない）
+    view.zoomTarget = cinematic ? 2.3 : player.s2 ? s2Zoom : player.s3 ? s3Zoom : 1;
     view.heightFollow = cinematic ? 0.5 : 0.4;
-    // スキル1で相手を捉えている間は、2人の中間を映す（投げた先の相手が画面から出ないように）
-    let focus = p1.group.position;
-    if (chasing) focus = v1.lerpVectors(p1.group.position, p2.group.position, 0.5).setY(0);
-    else if (player.sk && player.sk.hasTarget) focus = v1.lerpVectors(p1.group.position, p2.group.position, 0.5).setY(p1.group.position.y);
+    // スキル4の飛びかかり中は、カメラの追従を止める（相手の方へカメラが動かない）。終わったあとは、ゆっくり追いつく
+    const targetRate = player.state === 'skill4' ? 0 : 11;
+    view.followRate += (targetRate - view.followRate) * (1 - Math.exp(-(targetRate === 0 ? 40 : 2.4) * realDt));
+    const focus = p1.group.position; // 常に自分を映す
     view.update(realDt, focus, align);
   } else {
     camera.lookAt(controls.target);
