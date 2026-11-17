@@ -1975,7 +1975,75 @@ const pressed = (ctx, o) => {
   armR(o, 0.8, 0.9, 0.0, 0.8); armL(o, 0.8, 0.9, 0.0, 0.8);
 };
 
+// ============================================================
+// 擬音（素手。大声で言うと、その文字が出てくる）用のポーズ
+// ============================================================
+export function carryOnom(name, ctx, o) {
+  const t = ctx.time;
+  switch (name) {
+    case 'stand':
+      armR(o, 0.1 + (o.rShoulderSwing - 0.03) * 0.5, 0.18, 0.0, 0.3);
+      armL(o, 0.1 + (o.lShoulderSwing + 0.03) * 0.5, 0.18, 0.0, 0.3);
+      break;
+    case 'fight': { // 両手をひらいて、息をすって（胸がふくらむ）、いつでも叫べる構え
+      FSTANCE(o);
+      const br = sin(t * 3.2);
+      bset(o, { waistPitch: 0.04 + 0.02 * br, neckPitch: -0.12 });
+      armR(o, 1.05 + 0.04 * br, 0.5, 0.1, 1.3); armL(o, 1.05 + 0.04 * br, 0.5, 0.1, 1.3);
+      break;
+    }
+    default: break;
+  }
+}
+const oFight = (o) => { FSTANCE(o); bset(o, { waistPitch: 0.04, neckPitch: -0.12 }); armR(o, 1.05, 0.5, 0.1, 1.3); armL(o, 1.05, 0.5, 0.1, 1.3); };
+
+// ---- ドン: 息をすって（のけぞる）、両手で押し出す。0.36 で文字が出る ----
+const OA1 = [
+  { t: 0, pose: oFight },
+  { t: 0.2, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: -0.1, waistPitch: -0.18, neckPitch: -0.4, lKnee: 0.95, rKnee: 0.9 }); armR(o, 0.55, 0.45, 0.0, 1.9); armL(o, 0.55, 0.45, 0.0, 1.9); } },
+  { t: 0.36, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: 0.22, hipsPitch: 0.15, waistPitch: 0.4, neckPitch: -0.1, lHipSwing: 0.85, lKnee: 0.5, rHipSwing: -0.5, rKnee: 0.6, rFlat: 0.3 }); armR(o, 1.55, 0.1, 0.1, 0.1); armL(o, 1.55, 0.1, 0.1, 0.1); } },
+  { t: 0.6, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: 0.2, hipsPitch: 0.14, waistPitch: 0.4, lHipSwing: 0.85, lKnee: 0.5, rHipSwing: -0.5, rKnee: 0.6, rFlat: 0.3 }); armR(o, 1.5, 0.1, 0.1, 0.15); armL(o, 1.5, 0.1, 0.1, 0.15); } },
+  { t: 1, ease: 'out', pose: oFight },
+];
+const attackO1 = (ctx, o) => keyed(ctx.attackT, OA1, o);
+// ---- グラグラ: 足を上げて、ドスンと踏みつける。0.38 で文字が地面へ ----
+const OA2 = [
+  { t: 0, pose: oFight },
+  { t: 0.22, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { hipsX: -0.08, waistPitch: -0.1, neckPitch: -0.3, rHipSwing: 1.5, rKnee: 1.6, rHipOut: 0.2, lKnee: 0.4 }); armR(o, 2.0, 0.7, 0.0, 0.8); armL(o, 2.0, 0.7, 0.0, 0.8); } },
+  { t: 0.38, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { hipsPitch: 0.15, waistPitch: 0.55, neckPitch: -0.2, lKnee: 1.2, rHipSwing: 0.5, rKnee: 1.0, lHipOut: 0.5, rHipOut: 0.5 }); armR(o, 0.4, 1.0, 0.0, 0.5); armL(o, 0.4, 1.0, 0.0, 0.5); } },
+  { t: 0.7, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsPitch: 0.1, waistPitch: 0.5, lKnee: 1.1, rKnee: 1.0, lHipOut: 0.5, rHipOut: 0.5 }); armR(o, 0.5, 1.0, 0.0, 0.5); armL(o, 0.5, 1.0, 0.0, 0.5); } },
+  { t: 1, ease: 'out', pose: oFight },
+];
+function attackO2(ctx, o) {
+  keyed(ctx.attackT, OA2, o);
+  const t = ctx.attackT;
+  if (t > 0.38 && t < 0.8) { const k = (1 - (t - 0.38) / 0.42); o.hipsRoll += 0.06 * sin(ctx.time * 70) * k; o.hipsX += 0.03 * sin(ctx.time * 63) * k; } // 地面がゆれて、体もグラグラ
+}
+// ---- メラメラ: 両手をこすって火をおこし、右手を突き出す。0.38 で文字が出る ----
+const OA3 = [
+  { t: 0, pose: oFight },
+  { t: 0.2, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { waistPitch: 0.22, neckPitch: 0.1, lKnee: 0.85, rKnee: 0.8 }); armR(o, 1.2, 0.0, 0.5, 2.0); armL(o, 1.2, 0.0, 0.5, 2.0); } },
+  { t: 0.38, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { hipsYaw: 0.3, waistYaw: 0.35, hipsZ: 0.2, waistPitch: 0.35, lHipSwing: 0.85, lKnee: 0.5, rHipSwing: -0.5, rFlat: 0.3 }); armR(o, 1.55, 0.0, 0.1, 0.1); armL(o, 0.7, 0.4, 0.1, 1.9); } },
+  { t: 0.7, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsYaw: 0.3, waistYaw: 0.35, hipsZ: 0.2, waistPitch: 0.35, lHipSwing: 0.85, lKnee: 0.5, rHipSwing: -0.5, rFlat: 0.3 }); armR(o, 1.5, 0.0, 0.1, 0.15); armL(o, 0.7, 0.4, 0.1, 1.9); } },
+  { t: 1, ease: 'out', pose: oFight },
+];
+function attackO3(ctx, o) {
+  keyed(ctx.attackT, OA3, o);
+  const t = ctx.attackT;
+  if (t > 0.05 && t < 0.36) { const r = sin(ctx.time * 50) * 0.1; o.rShoulderSwing += r; o.lShoulderSwing -= r; } // 手をこすり合わせる
+}
+// ---- スキル・必殺技の「叫び」: 口の横に手をあてて息をすい（0〜0.35）、腕をひろげて叫ぶ（0.5 で文字）----
+const OSH = [
+  { t: 0, pose: oFight },
+  { t: 0.3, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { waistPitch: -0.12, neckPitch: -0.45, hipsZ: -0.08, lKnee: 0.8, rKnee: 0.75 }); armR(o, 2.0, 0.55, 0.0, 2.2); armL(o, 2.0, 0.55, 0.0, 2.2); } },
+  { t: 0.5, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { waistPitch: 0.3, hipsZ: 0.2, neckPitch: -0.2, lHipSwing: 0.8, lKnee: 0.5, rHipSwing: -0.45, rFlat: 0.3 }); armR(o, 1.45, 0.9, 0.0, 0.2); armL(o, 1.45, 0.9, 0.0, 0.2); } },
+  { t: 0.75, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { waistPitch: 0.3, hipsZ: 0.2, lHipSwing: 0.8, lKnee: 0.5, rHipSwing: -0.45, rFlat: 0.3 }); armR(o, 1.4, 0.9, 0.0, 0.25); armL(o, 1.4, 0.9, 0.0, 0.25); } },
+  { t: 1, ease: 'out', pose: oFight },
+];
+const onomShout = (ctx, o) => keyed(ctx.attackT, OSH, o);
+
 export const POSES = {
+  attackO1, attackO2, attackO3, onomShout,
   attackA1, attackA2, attackA3, arrowCannon, arrowStick, arrowJump, arrowDive, arrowSlap, arrowRaise, arrowRush, pressed,
   attackF1, attackF2, attackF3, attackFAir, attackFStrike, fangRaise, fangSweep1, fangSweep2, fangSweep3, fangMorph, fangSpin, fangLand, fangBerserk, lookAround,
   attackB1, attackB2, attackB3, attackBP, attackBQ, batCall, batPitch, batPitchL, batBallDraw, batHaymaker, batCatch, batToss, batLeap, batSmash,

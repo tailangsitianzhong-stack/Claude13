@@ -294,9 +294,9 @@ export function createCharacter(options = {}) {
     bat.visible = id === 'bat';
     claws.visible = clawsL.visible = fangs.visible = id === 'fang';
     great.visible = false;
-    held = id === 'bat' ? bat : id === 'fang' ? claws : id === 'arrow' ? fist : sword;
-    heldTrail = id === 'bat' ? trailBat : id === 'fang' ? trailFang : id === 'arrow' ? null : trail;
-    animator.armed = id === 'bat' ? 'bat' : id === 'fang' ? 'fang' : id === 'arrow' ? 'arrow' : 'sword';
+    held = id === 'bat' ? bat : id === 'fang' ? claws : id === 'arrow' || id === 'onom' ? fist : sword;
+    heldTrail = id === 'bat' ? trailBat : id === 'fang' ? trailFang : id === 'arrow' || id === 'onom' ? null : trail;
+    animator.armed = id === 'bat' ? 'bat' : id === 'fang' ? 'fang' : id === 'arrow' ? 'arrow' : id === 'onom' ? 'onom' : 'sword';
   };
 
   const animator = new Animator({ group, joints, soles, scale: o.scale, armed: sword ? 'sword' : false });

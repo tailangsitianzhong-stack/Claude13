@@ -3,6 +3,9 @@
 
 export const STATUS_DEFS = {
   stun: { label: '気絶', icon: '★', color: '#ffd54a' }, // 動けず、攻撃もできない。頭上に星が回る
+  burn: { label: '燃焼', icon: '火', color: '#ff7a2a' }, // 燃えて、少しずつダメージ（擬音のメラメラ）
+  haste: { label: '加速', icon: '»', color: '#6fe0ff' }, // 自分の移動速度 +50%（擬音のスー）
+  power: { label: '攻撃UP', icon: '▲', color: '#ff7ac0' }, // 自分の攻撃力 +50%（擬音のドキドキ）
   slow: { label: '鈍足', icon: '▼', color: '#4ca8ff' }, // 移動速度が50%になる（矢印のスキル4）。胸に青い矢印が貼られる
 };
 

@@ -4,26 +4,29 @@ import { STATUS_DEFS } from '../character/StatusEffects.js';
 // STATUS_DEFS に追加した状態異常は、そのまま自動でここに出る。
 
 const CSS = `
-#status-hud { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; gap: 6px;
+.status-hud { position: fixed; top: 74px; left: 50%; transform: translateX(-50%); z-index: 6; display: flex; gap: 6px;
   pointer-events: none; font: 700 13px/1 system-ui, sans-serif; }
-#status-hud .st { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; border-radius: 999px;
+.status-hud .st { display: flex; align-items: center; gap: 6px; padding: 5px 10px 5px 8px; border-radius: 999px;
   background: rgba(20, 24, 40, 0.78); color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.3); border: 2px solid var(--c);
   animation: st-pop 0.18s ease-out; }
-#status-hud .who { opacity: 0.7; font-size: 11px; }
-#status-hud .ic { color: var(--c); font-size: 16px; }
-#status-hud .bar { width: 46px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.2); overflow: hidden; }
-#status-hud .bar i { display: block; height: 100%; width: 100%; background: var(--c); transform-origin: left; }
-#status-hud .tm { min-width: 2.4em; text-align: right; font-variant-numeric: tabular-nums; }
+.status-hud .who { opacity: 0.7; font-size: 11px; }
+.status-hud .ic { color: var(--c); font-size: 16px; }
+.status-hud .bar { width: 46px; height: 5px; border-radius: 3px; background: rgba(255,255,255,0.2); overflow: hidden; }
+.status-hud .bar i { display: block; height: 100%; width: 100%; background: var(--c); transform-origin: left; }
+.status-hud .tm { min-width: 2.4em; text-align: right; font-variant-numeric: tabular-nums; }
 @keyframes st-pop { from { transform: scale(1.35); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 `;
 
 export class StatusHud {
-  constructor(label = 'P2') {
+  // opts: { id, left（px。指定すると、画面の左に出す。自分の状態異常用） }
+  constructor(label = 'P2', opts = {}) {
     const style = document.createElement('style');
     style.textContent = CSS;
     document.head.appendChild(style);
     this.root = document.createElement('div');
-    this.root.id = 'status-hud';
+    this.root.id = opts.id ?? 'status-hud';
+    this.root.classList.add('status-hud');
+    if (opts.left != null) { this.root.style.left = opts.left + 'px'; this.root.style.top = (opts.top ?? 100) + 'px'; this.root.style.transform = 'none'; }
     document.body.appendChild(this.root);
     this.label = label;
     this.rows = new Map(); // name → { el, bar, time }

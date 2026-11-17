@@ -44,6 +44,13 @@ export const DAMAGE = {
   arrowSlam: 105,                 // スキル2: 高く飛んでの叩きつけ
   arrowRushBase: 40, arrowRushPerDist: 2.4, arrowRushMax: 230, // スキル3: 加速ダッシュ（距離が遠いほど高い。リグ単位の距離あたり）
   arrowUltRush: 60, arrowUltJunk: 12, arrowUltBig: 45, arrowUltCrush: 150, // 必殺技: 突撃・ゴミ1つ・大きなゴミ・押しつぶし
+  // 擬音
+  onom: [38, 44, 22],             // 通常攻撃（ドン・グラグラ・メラメラ）
+  onomBurnTick: 9,                // 燃焼: 0.5秒ごと（4秒間）
+  onomDokan: [30, 16, 9, 6],      // スキル1: 爆発1回（連鎖の世代ごと）
+  onomGuru: 55,                   // スキル3: グルグル（気絶）
+  onomDoki: 18, onomDoro: 20,     // スキル4・コンボ
+  onomUltDokan: 45, onomUltZudon: 140, onomUltBan: 14, onomUltFinal: 70, // 必殺技
   ultDagger: 40,                  // 必殺技: 小剣が刺さる
   ultSlash: 28,                   // 必殺技: 斬撃1回ぶん
   ultFinal: 160,                  // 必殺技: 最後の一撃

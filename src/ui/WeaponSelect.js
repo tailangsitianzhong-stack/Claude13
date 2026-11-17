@@ -19,8 +19,9 @@ const CSS = `
 #weapon-select.out { opacity: 0; pointer-events: none; }
 #weapon-select h1 { margin: 0; font: 900 min(7vw, 36px)/1 system-ui, sans-serif; letter-spacing: 0.3em; text-shadow: 0 0 18px #4fd8ff, 0 3px 0 #04203d; }
 #weapon-select .sub { margin-top: -6px; font-size: 12px; letter-spacing: 0.3em; color: #9fd4ff; }
-#weapon-select .cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; width: 100%; max-width: 920px; }
-@media (max-width: 560px) { #weapon-select .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+#weapon-select .cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 1100px; }
+@media (max-width: 760px) { #weapon-select .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 480px) { #weapon-select .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 #weapon-select .card { box-sizing: border-box; min-width: 0; padding: 12px 12px 14px; border-radius: 14px; text-align: center; cursor: pointer; position: relative;
   background: linear-gradient(#1b3366, #0f1c40); border: 3px solid rgba(255,255,255,0.35); box-shadow: 0 6px 0 #040a1c, 0 8px 18px rgba(0,0,0,0.45);
   transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s; }
@@ -75,7 +76,14 @@ const ARROW_ICON = `
   <rect x="6" y="74" width="30" height="26" rx="7" fill="#fff" stroke="#3a4560" stroke-width="2.4"/>
   <path d="M40 80 L58 80 L58 74 L70 87 L58 100 L58 94 L40 94 Z" fill="#ffc21a" stroke="#5a3a10" stroke-width="2.2" transform="translate(-8 0) scale(0.9)"/>
 </svg>`;
-const ICONS = { sword: SWORD_ICON, bat: BAT_ICON, fang: FANG_ICON, arrow: ARROW_ICON };
+// 擬音のアイコン（吹き出しと、文字）
+const ONOM_ICON = `
+<svg viewBox="0 0 64 110" aria-hidden="true" stroke-linejoin="round" stroke-linecap="round">
+  <path d="M4 14 Q4 6 14 6 H50 Q60 6 60 14 V50 Q60 58 50 58 H34 L24 74 L26 58 H14 Q4 58 4 50 Z" fill="#fff" stroke="#5a2a00" stroke-width="2.6"/>
+  <text x="32" y="40" text-anchor="middle" font-family="'Hiragino Maru Gothic ProN','Yu Gothic',system-ui,sans-serif" font-weight="900" font-size="23" fill="#ff7a00" stroke="#5a2a00" stroke-width="1">ドン</text>
+  <text x="32" y="92" text-anchor="middle" font-family="'Hiragino Maru Gothic ProN','Yu Gothic',system-ui,sans-serif" font-weight="900" font-size="15" fill="#ff3a1a" stroke="#4a0000" stroke-width="0.8" transform="rotate(-8 32 92)">メラメラ</text>
+</svg>`;
+const ICONS = { sword: SWORD_ICON, bat: BAT_ICON, fang: FANG_ICON, arrow: ARROW_ICON, onom: ONOM_ICON };
 const STAT_LABELS = { power: '攻撃力', speed: '速さ', reach: 'リーチ' };
 
 export class WeaponSelect {

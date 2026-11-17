@@ -256,6 +256,17 @@ const ARROW_ICONS = {
   ult: svgWrap('', `<circle cx="18" cy="40" r="7" fill="#fff" stroke="#124a55" stroke-width="2.4"/><rect x="12" y="46" width="12" height="12" rx="3" fill="#fff" stroke="#124a55" stroke-width="2.4"/>${ARW('#3ff0ff', 90, 42, 20, 0.95, '#124a55')}`),
 };
 
+// ---- 擬音用のアイコン（吹き出しと、文字）----
+const SAY = (txt, fill, edge, size = 22, x = 32, y = 36) => `<path d="M6 12 Q6 6 14 6 H50 Q58 6 58 12 V40 Q58 46 50 46 H30 L20 58 L22 46 H14 Q6 46 6 40 Z" fill="#fff" stroke="${edge}" stroke-width="2.6"/><text x="${x}" y="${y}" text-anchor="middle" font-family="'Hiragino Maru Gothic ProN','Yu Gothic',system-ui,sans-serif" font-weight="900" font-size="${size}" fill="${fill}" stroke="${edge}" stroke-width="0.8">${txt}</text>`;
+const ONOM_ICONS = {
+  attack: svgWrap('', SAY('ドン', '#ff9a00', '#5a2a00', 22, 32, 34)),
+  skill1: svgWrap('icon-main', SAY('ドカン', '#ff3a1a', '#4a0000', 15, 32, 33)),
+  skill3: svgWrap('icon-alt', SAY('グルグル', '#a05cff', '#2a0a52', 11, 32, 32)),
+  skill2: svgWrap('icon-main', SAY('スー', '#25b8ff', '#04334a', 22, 32, 34)),
+  skill4: svgWrap('icon-alt', SAY('ドキドキ', '#ff3a9a', '#5a0a35', 11, 32, 32)),
+  ult: svgWrap('', SAY('ズドン', '#e0a000', '#5a2a00', 15, 32, 33)),
+};
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -408,7 +419,7 @@ export class TouchControls {
 
   // 武器に合わせて、ボタンのアイコンを入れ替える（'sword' は最初のまま。'bat' はバット用）
   setWeapon(id) {
-    const ICONS = id === 'bat' ? BAT_ICONS : id === 'fang' ? FANG_ICONS : id === 'arrow' ? ARROW_ICONS : null;
+    const ICONS = id === 'bat' ? BAT_ICONS : id === 'fang' ? FANG_ICONS : id === 'arrow' ? ARROW_ICONS : id === 'onom' ? ONOM_ICONS : null;
     if (!ICONS) return;
     const swap = (sel, icon, svgSel = 'svg') => {
       const el = this.root.querySelector(sel);

@@ -36,11 +36,11 @@ const CSS = `
 #fight-banner.show { animation: banner-pop 1.6s ease-out forwards; }
 #fight-banner small { display: block; margin-top: 10px; font-size: 18px; -webkit-text-stroke: 0; color: #fff; letter-spacing: 2px; text-shadow: 0 2px 4px #000a; }
 @keyframes banner-pop { 0% { opacity: 0; transform: translate(-50%, -50%) scale(2.2); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(0.95); } }
-body.pre-match #fight-hud, body.pre-match #status-hud, body.pre-match #touch-ui, body.pre-match #hud, body.pre-match #combo-prompt, body.pre-match #ult-prompt { visibility: hidden; }
+body.pre-match #fight-hud, body.pre-match .status-hud, body.pre-match #touch-ui, body.pre-match #hud, body.pre-match #combo-prompt, body.pre-match #ult-prompt { visibility: hidden; }
 body.cine-on #dmg-layer .dmg { font-size: 15px; -webkit-text-stroke: 3px #04203d; opacity: 0.9; }
 body.cine-on #dmg-layer .dmg.big { font-size: 20px; }
 body.cine-on #dmg-layer .dmg.huge { font-size: 34px; }
-body.cine-on #fight-hud, body.cine-on #status-hud, body.cine-on #touch-ui, body.cine-on #combo-prompt, body.cine-on #ult-prompt { opacity: 0 !important; pointer-events: none !important; }
+body.cine-on #fight-hud, body.cine-on .status-hud, body.cine-on #touch-ui, body.cine-on #combo-prompt, body.cine-on #ult-prompt { opacity: 0 !important; pointer-events: none !important; }
 `;
 
 const v = new THREE.Vector3();
