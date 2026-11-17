@@ -54,6 +54,7 @@ export class Net {
     this.onOpen = () => {};    // つながった
     this.onClose = () => {};   // 切れた・つながらなかった（理由）
     this.lastRecv = 0;
+    this.lastTick = 0;
     this.closed = false;
     this.pingTimer = null;
   }
@@ -125,10 +126,15 @@ export class Net {
       if (kind === 'st') { this.stOpen = true; this.checkOpen(); return; }
       this.evOpen = true;
       this.lastRecv = performance.now();
-      // 切れたことに早く気づくための、見張り（2 秒ごとに ping、7 秒なにも届かなければ切れたとみなす）。往復の時間も、ここで測る
+      // 切れたことに早く気づくための、見張り（2 秒ごとに ping、15 秒なにも届かなければ切れたとみなす）。往復の時間も、ここで測る。
+      // こちらの画面が重くて止まっていた（タイマーが大きく遅れた）ときは、通信が切れたのではないので、数えなおす
+      this.lastTick = performance.now();
       this.pingTimer = setInterval(() => {
-        this.send({ k: 'ping', t: performance.now() });
-        if (performance.now() - this.lastRecv > 7000) this.fail('あいてとの通信が切れました');
+        const now = performance.now();
+        if (now - this.lastTick > 3500) this.lastRecv = now;
+        this.lastTick = now;
+        this.send({ k: 'ping', t: now });
+        if (now - this.lastRecv > 15000) this.fail('あいてとの通信が切れました');
       }, 2000);
       this.send({ k: 'ping', t: performance.now() });
       // 速い通路が開かないネットワークでは、確実な通路だけで続ける（4 秒待つ）
