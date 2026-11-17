@@ -9,7 +9,7 @@
 //  - 体力が 0 になったほうが ko を送り、負けになる。
 // 【できないこと】相手の技の演出（飛んでいく球・文字・ムービー）は、相手の画面にだけ出る。こちらには、モーションと「当たったときの反応」が出る。
 
-const VIS_KEYS = ['sword', 'bat', 'fist', 'claws', 'clawsL', 'fangs', 'dagger', 'great', 'swordModel', 'armSticker'];
+const VIS_KEYS = ['sword', 'bat', 'fist', 'claws', 'clawsL', 'fangs', 'dagger', 'great', 'swordModel', 'armSticker', 'sawL', 'legSawL', 'legSawR', 'headSaw', 'gearL', 'gearR'];
 const r3 = (v) => Math.round(v * 1000) / 1000;
 const wrapAngle = (d) => d - Math.PI * 2 * Math.round(d / (Math.PI * 2));
 

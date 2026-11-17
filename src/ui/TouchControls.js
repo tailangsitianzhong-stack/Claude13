@@ -267,6 +267,22 @@ const ONOM_ICONS = {
   ult: svgWrap('', SAY('ズドン', '#e0a000', '#5a2a00', 15, 32, 33)),
 };
 
+// ---- チェンソー用のアイコン ----
+const SAWSHAPE = (rot = 0, cx = 32, cy = 32, k = 1) => `<g transform="translate(${cx} ${cy}) rotate(${rot}) scale(${k})"><rect x="-6" y="-26" width="12" height="32" rx="3" fill="#cfd6dd" stroke="#2a3138" stroke-width="2.2"/><path d="M-8 -24 H-6 M-8 -16 H-6 M-8 -8 H-6 M6 -24 H8 M6 -16 H8 M6 -8 H8" stroke="#1c1f24" stroke-width="2.6"/><rect x="-10" y="4" width="20" height="16" rx="3" fill="#e8590c" stroke="#5a2204" stroke-width="2.2"/></g>`;
+const SAW_ICONS = {
+  attack: svgWrap('', `${SAWSHAPE(-40, 32, 34, 1)}<path d="M8 12 L18 16 M4 22 L14 24" stroke="#ffd54a" stroke-width="3"/>`),
+  // スキル1: ナイフと、振り下ろし
+  skill1: svgWrap('icon-main', `<path d="M10 14 L30 24 L26 28 Z" fill="#e8eef5" stroke="#2a3138" stroke-width="2"/><rect x="26" y="24" width="12" height="5" rx="2" fill="#5a3a20" stroke="#2a3138" stroke-width="2" transform="rotate(25 32 26)"/>${SAWSHAPE(180, 44, 36, 0.8)}<path d="M52 56 H62 M48 60 H64" stroke="#fff" stroke-width="3"/>`),
+  // スキル3: 両手のチェンソー
+  skill3: svgWrap('icon-alt', `${SAWSHAPE(-50, 20, 34, 0.7)}${SAWSHAPE(50, 44, 34, 0.7)}<path d="M26 8 L32 20 L38 8" fill="none" stroke="#e0182c" stroke-width="4"/><circle cx="32" cy="54" r="4" fill="#e0182c"/>`),
+  // スキル2: 足のチェンソー
+  skill2: svgWrap('icon-main', `<path d="M10 20 L26 30 L34 52" fill="none" stroke="#fff" stroke-width="9"/>${SAWSHAPE(-20, 44, 36, 0.8)}<path d="M4 44 H14 M2 52 H12" stroke="#fff" stroke-width="3"/>`),
+  // スキル4: 歯車
+  skill4: svgWrap('icon-alt', `<circle cx="32" cy="32" r="14" fill="#9aa3ad" stroke="#2a3138" stroke-width="3"/><circle cx="32" cy="32" r="5" fill="#1c1f24"/>${Array.from({ length: 10 }, (_, i) => `<rect x="29" y="6" width="6" height="9" fill="#e8590c" stroke="#5a2204" stroke-width="1.6" transform="rotate(${i * 36} 32 32)"/>`).join('')}<path d="M6 54 H18 M46 54 H58" stroke="#fff" stroke-width="3"/>`),
+  // 必殺技: 引き金
+  ult: svgWrap('', `<rect x="24" y="8" width="16" height="36" rx="4" fill="#d9d9d9" stroke="#2a3138" stroke-width="2.6"/><rect x="18" y="42" width="28" height="9" rx="3" fill="#e0182c" stroke="#4a0008" stroke-width="2.4"/><path d="M32 8 Q32 0 44 2" fill="none" stroke="#222" stroke-width="3"/><path d="M8 26 L16 22 M56 30 L48 26" stroke="#ffd54a" stroke-width="3"/>`),
+};
+
 export class TouchControls {
   constructor() {
     this.x = 0;        // スティックの横（右 +）
@@ -419,7 +435,7 @@ export class TouchControls {
 
   // 武器に合わせて、ボタンのアイコンを入れ替える（'sword' は最初のまま。'bat' はバット用）
   setWeapon(id) {
-    const ICONS = id === 'bat' ? BAT_ICONS : id === 'fang' ? FANG_ICONS : id === 'arrow' ? ARROW_ICONS : id === 'onom' ? ONOM_ICONS : null;
+    const ICONS = id === 'saw' ? SAW_ICONS : id === 'bat' ? BAT_ICONS : id === 'fang' ? FANG_ICONS : id === 'arrow' ? ARROW_ICONS : id === 'onom' ? ONOM_ICONS : null;
     if (!ICONS) return;
     const swap = (sel, icon, svgSel = 'svg') => {
       const el = this.root.querySelector(sel);

@@ -1820,6 +1820,133 @@ const lookAround = (ctx, o) => {
   bset(o, { hipsX: 0.05 * sin(t * 2.6) });
 };
 
+
+// ============================================================
+// チェンソー用のポーズ
+// 持ち歩き・構え・ジャンプ攻撃（叩きつけ）・必殺技の一部は、剣のポーズをそのまま使う（carrySaw）。
+// 腕の向きの指定は、爪と同じ（clawR / clawL: 刃の向き pitch。0 = 水平に前、π/2 = 真上、負 = 下向き）。
+// ============================================================
+export const carrySaw = (name, ctx, o) => carrySword(name, ctx, o);
+const sReady = (o) => { FSTANCE(o); clawR(o, 1.0, 0.25, 0.2, 1.2, 0.25); clawL(o, 1.1, 0.5, 0.1, 1.2, 0.3); };
+const sShake = (ctx, o, k) => { const r = sin(ctx.time * 95) * 0.02 * k; o.rShoulderSwing += r; o.lShoulderSwing -= r; };
+
+// ---- 通常1: 引き紐をぐいっと引いてエンジンをかけ、右上から左下へ斜めに斬る。0.5 で斬る ----
+const S1 = [
+  { t: 0, pose: sReady },
+  { t: 0.12, ease: 'inout', pose: (o) => { // 左手を紐へのばし、チェンソーを低く構える
+    FSTANCE(o); bset(o, { waistPitch: 0.3, hipsYaw: -0.15, waistYaw: -0.2, lKnee: 0.8, rKnee: 0.75 });
+    clawR(o, 0.8, 0.3, 0.2, 1.0, -0.3); clawL(o, 1.4, 0.2, 0.3, 0.5, 0.0);
+  } },
+  { t: 0.28, ease: 'in', pose: (o) => { // 紐を思い切り後ろへ引く（体がひねられる）
+    FSTANCE(o); bset(o, { waistPitch: 0.25, hipsYaw: -0.5, waistYaw: -0.55, neckYaw: 0.3, lKnee: 0.85, rKnee: 0.8 });
+    clawR(o, 0.8, 0.3, 0.2, 1.0, -0.3); clawL(o, -0.4, 0.5, 0.4, 1.0, 0.0);
+  } },
+  { t: 0.38, ease: 'out', pose: (o) => { // 振りかぶる: チェンソーを右上へ
+    FSTANCE(o); bset(o, { hipsYaw: -0.45, waistYaw: -0.75, neckYaw: 0.7, waistPitch: 0.1, lKnee: 0.85, rKnee: 0.8 });
+    clawR(o, 2.55, 0.85, 0.0, 0.8, 1.2); clawL(o, 0.9, 0.55, 0.2, 1.0, 0.4);
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => { // 踏み込んで、左下へ斬り下ろす
+    FSTANCE(o); bset(o, { hipsYaw: 0.4, waistYaw: 0.7, neckYaw: -0.4, hipsZ: 0.16, waistPitch: 0.45, hipsPitch: 0.14, lHipSwing: -0.3, lKnee: 0.4, lFlat: 0.4, rHipSwing: 0.7, rKnee: 0.5, rFlat: 1 });
+    clawR(o, 1.1, -0.35, 0.3, 0.3, -0.35); clawL(o, 0.4, 0.8, 0.1, 0.8, 0.0);
+  } },
+  { t: 0.66, ease: 'out', pose: (o) => { // 振り抜き
+    FSTANCE(o); bset(o, { hipsYaw: 0.65, waistYaw: 0.95, neckYaw: -0.8, hipsZ: 0.16, waistPitch: 0.5, hipsPitch: 0.16, lHipSwing: -0.35, lKnee: 0.45, lFlat: 0.3, rHipSwing: 0.8, rKnee: 0.6, rFlat: 1 });
+    clawR(o, 0.6, -0.8, 0.4, 0.5, -0.9); clawL(o, 0.4, 0.8, 0.1, 0.8, 0.0);
+  } },
+  { t: 1, ease: 'out', pose: sReady },
+];
+const attackS1 = (ctx, o) => { keyed(ctx.attackT, S1, o); sShake(ctx, o, 1); };
+
+// ---- 通常2: 沈み込んで、一瞬で距離を詰め、チェンソーを相手の首元へ突き刺す。0.32 で刺さり、そのまま押しつける ----
+const S2 = [
+  { t: 0, pose: sReady },
+  { t: 0.16, ease: 'inout', pose: (o) => { // 低く沈み、チェンソーを腰に引きつける
+    FSTANCE(o); bset(o, { hipsZ: -0.12, hipsPitch: 0.3, waistPitch: 0.6, neckPitch: -0.2, lHipSwing: 0.6, lKnee: 1.15, rHipSwing: 0.1, rKnee: 1.1 });
+    clawR(o, 0.55, 0.3, 0.2, 1.7, 0.15); clawL(o, 1.2, 0.5, 0.2, 1.0, 0.3);
+  } },
+  { t: 0.32, ease: 'in', pose: (o) => { // 飛び込み: 体が前へ倒れ、チェンソーが首の高さへ一直線
+    FSTANCE(o); bset(o, { hipsZ: 0.38, hipsPitch: 0.45, waistPitch: 0.75, neckPitch: -0.45, lHipSwing: 0.95, lKnee: 0.4, rHipSwing: -0.7, rKnee: 0.5, rFlat: 0.2 });
+    clawR(o, 1.62, 0.15, 0.2, 0.15, 1.9); clawL(o, 1.5, 0.45, 0.3, 0.4, 1.9);
+  } },
+  { t: 0.42, ease: 'out', pose: (o) => { // ぐっと押し込む
+    FSTANCE(o); bset(o, { hipsZ: 0.42, hipsPitch: 0.5, waistPitch: 0.85, neckPitch: -0.45, lHipSwing: 1.0, lKnee: 0.4, rHipSwing: -0.75, rKnee: 0.5, rFlat: 0.2 });
+    clawR(o, 1.66, 0.15, 0.2, 0.1, 1.95); clawL(o, 1.5, 0.45, 0.3, 0.4, 1.9);
+  } },
+  { t: 0.8, ease: 'inout', pose: (o) => { // 押しつけたまま、ぎりぎりと切り込む
+    FSTANCE(o); bset(o, { hipsZ: 0.42, hipsPitch: 0.5, waistPitch: 0.9, neckPitch: -0.4, lHipSwing: 1.0, lKnee: 0.45, rHipSwing: -0.75, rKnee: 0.5, rFlat: 0.2 });
+    clawR(o, 1.7, 0.15, 0.2, 0.1, 2.0); clawL(o, 1.5, 0.45, 0.3, 0.4, 1.9);
+  } },
+  { t: 1, ease: 'out', pose: sReady },
+];
+const attackS2 = (ctx, o) => { keyed(ctx.attackT, S2, o); const t = ctx.attackT; if (t > 0.4 && t < 0.82) { o.hipsX += 0.035 * sin(ctx.time * 80); o.waistRoll += 0.05 * sin(ctx.time * 70); } sShake(ctx, o, 1.6); };
+
+// ---- 通常3: チェンソーを両手で持って、体ごと一回転して振り回す。0.3〜0.75 が回転斬り ----
+const attackS3 = (ctx, o) => {
+  const t = ctx.attackT;
+  const wind = smooth(t / 0.28);
+  const spin = smooth((t - 0.28) / 0.46);
+  const rec = smooth((t - 0.74) / 0.26);
+  FSTANCE(o);
+  const a = wrap(-1.0 * wind + (2 * PI + 1.0) * spin);   // 回転の角度（-π〜π にまとめる。同じ向きなので、見た目は連続）
+  bset(o, { hipsYaw: a, hipsPitch: 0.1, waistPitch: 0.2 * (1 - rec), lKnee: 0.8 - 0.2 * rec, rKnee: 0.75 - 0.2 * rec, lHipSwing: 0.4, rHipSwing: -0.1 });
+  // 回している間は、腕を水平にのばして、チェンソーを横へ振り出す
+  const out = 1 - rec;
+  clawR(o, 1.55 * out + 1.0 * rec, 1.35 * out + 0.25 * rec, 0.0, 0.25 * out + 1.2 * rec, 0.0 * out + 0.25 * rec);
+  clawL(o, 1.55 * out + 1.1 * rec, 1.35 * out + 0.5 * rec, 0.0, 0.3 * out + 1.2 * rec, 0.0 * out + 0.3 * rec);
+  sShake(ctx, o, 2);
+};
+
+// ---- スキル1: ナイフを投げる（0.5 で放つ）----
+const SKN = [
+  { t: 0, pose: sReady },
+  { t: 0.32, ease: 'inout', pose: (o) => { FSTANCE(o); bset(o, { hipsYaw: 0.25, waistYaw: 0.5, neckYaw: -0.3, lKnee: 0.8 }); clawR(o, 0.95, 0.3, 0.2, 1.2, 0.2); clawL(o, 2.5, 0.6, 0.0, 1.0, 1.0); } },
+  { t: 0.5, ease: 'in', pose: (o) => { FSTANCE(o); bset(o, { hipsYaw: -0.3, waistYaw: -0.55, neckYaw: 0.3, hipsZ: 0.15, waistPitch: 0.4, lHipSwing: 0.6, lKnee: 0.5 }); clawR(o, 0.95, 0.3, 0.2, 1.2, 0.2); clawL(o, 1.55, 0.2, 0.2, 0.15, 0.0); } },
+  { t: 1, ease: 'out', pose: sReady },
+];
+const sawThrow = (ctx, o) => { keyed(ctx.attackT, SKN, o); sShake(ctx, o, 1); };
+
+// ---- スキル1: チェンソーを頭上へかかげ、全身で振り下ろす（0.5 で叩きつける）----
+const SOH = [
+  { t: 0, pose: sReady },
+  { t: 0.36, ease: 'inout', pose: (o) => { // のけぞって、チェンソーを高く
+    FSTANCE(o); bset(o, { hipsZ: -0.1, hipsPitch: -0.1, waistPitch: -0.3, neckPitch: -0.2, lKnee: 0.9, rKnee: 0.85 });
+    clawR(o, 3.0, 0.45, 0.0, 0.5, 1.4); clawL(o, 3.0, 0.45, 0.0, 0.5, 1.4);
+  } },
+  { t: 0.5, ease: 'in', pose: (o) => { // 叩きつける
+    FSTANCE(o); bset(o, { hipsZ: 0.3, hipsPitch: 0.3, waistPitch: 1.0, neckPitch: -0.3, lHipSwing: 0.9, lKnee: 0.5, rHipSwing: -0.5, rKnee: 0.6, rFlat: 0.3 });
+    clawR(o, 1.45, 0.1, 0.2, 0.3, 0.7); clawL(o, 1.45, 0.1, 0.2, 0.3, 0.7);
+  } },
+  { t: 0.75, ease: 'out', pose: (o) => { FSTANCE(o); bset(o, { hipsZ: 0.3, hipsPitch: 0.3, waistPitch: 1.0, lHipSwing: 0.9, lKnee: 0.5, rHipSwing: -0.5, rKnee: 0.6, rFlat: 0.3 }); clawR(o, 1.4, 0.1, 0.2, 0.35, 0.65); clawL(o, 1.4, 0.1, 0.2, 0.35, 0.65); } },
+  { t: 1, ease: 'out', pose: sReady },
+];
+const sawOverhead = (ctx, o) => { keyed(ctx.attackT, SOH, o); sShake(ctx, o, 1.4); };
+
+// ---- スキル2: 足にチェンソーを生やす（沈み込んで、足をふるわせる。attackT 0 → 1）----
+const sawLegGrow = (ctx, o) => {
+  const k = smooth(ctx.attackT);
+  FSTANCE(o);
+  bset(o, { hipsPitch: 0.3 * k, waistPitch: 0.5 * k, neckPitch: -0.2, lKnee: 0.65 + 0.5 * k, rKnee: 0.55 + 0.5 * k, lHipOut: 0.3 + 0.2 * k, rHipOut: 0.3 + 0.2 * k, hipsX: 0.03 * sin(ctx.time * 80) * k });
+  clawR(o, 1.0, 0.5 + 0.6 * k, 0.1, 1.0, 0.2); clawL(o, 1.0, 0.5 + 0.6 * k, 0.1, 1.0, 0.2);
+};
+
+// ---- スキル2・必殺技: 飛び蹴り。体が横になって宙を飛び、片足を前へ突き出す（attackT 0 → 1。0.5 で当たる）----
+const sawKick = (ctx, o) => {
+  const t = clamp01(ctx.attackT);
+  const k = smooth(t / 0.3);
+  o.ground = 0;
+  o.lift = 1.6 * k;
+  bset(o, { hipsPitch: 0.55 * k, waistPitch: 0.15, neckPitch: -0.25, rHipSwing: 1.75 * k, rKnee: 0.12, rHipOut: 0.1, rAnkle: -0.5, lHipSwing: -0.45 * k, lKnee: 0.9 * k, lHipOut: 0.15 });
+  clawR(o, 0.9, 0.9 * k, 0.0, 0.5, 0.0); clawL(o, 0.9, 0.9 * k, 0.0, 0.5, 0.0);
+};
+
+// ---- スキル4: 足に歯車を生やす（沈み込んで、足を踏みならす。attackT 0 → 1）----
+const sawGear = (ctx, o) => {
+  const k = sin(clamp01(ctx.attackT) * PI);
+  FSTANCE(o);
+  bset(o, { hipsPitch: 0.15 + 0.15 * k, waistPitch: 0.3 + 0.3 * k, lKnee: 0.65 + 0.4 * k, rKnee: 0.55 + 0.4 * k, hipsX: 0.03 * sin(ctx.time * 70) * k });
+  clawR(o, 0.9, 0.5, 0.1, 1.1, 0.0); clawL(o, 0.9, 0.5, 0.1, 1.1, 0.0);
+};
+
 // ============================================================
 // 矢印（素手。矢印のステッカーを貼って戦う）用のポーズ
 // ============================================================
@@ -2043,6 +2170,7 @@ const OSH = [
 const onomShout = (ctx, o) => keyed(ctx.attackT, OSH, o);
 
 export const POSES = {
+  attackS1, attackS2, attackS3, sawThrow, sawOverhead, sawLegGrow, sawKick, sawGear,
   attackO1, attackO2, attackO3, onomShout,
   attackA1, attackA2, attackA3, arrowCannon, arrowStick, arrowJump, arrowDive, arrowSlap, arrowRaise, arrowRush, pressed,
   attackF1, attackF2, attackF3, attackFAir, attackFStrike, fangRaise, fangSweep1, fangSweep2, fangSweep3, fangMorph, fangSpin, fangLand, fangBerserk, lookAround,

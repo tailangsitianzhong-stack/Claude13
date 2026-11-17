@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { RIG } from './rig.js';
-import { POSES, carrySword, carryBat, carryFang, carryArrow, carryOnom, makePose, resetPose, lerpPose, copyPose } from './poses.js';
+import { POSES, carrySword, carryBat, carryFang, carryArrow, carryOnom, carrySaw, makePose, resetPose, lerpPose, copyPose } from './poses.js';
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const tmp = new THREE.Vector3();
@@ -76,6 +76,7 @@ export class Animator {
     POSES[name](this, out);
     if (this.armed === 'bat') carryBat(name, this, out);
     else if (this.armed === 'fang') carryFang(name, this, out);
+    else if (this.armed === 'saw') carrySaw(name, this, out);
     else if (this.armed === 'arrow') carryArrow(name, this, out);
     else if (this.armed === 'onom') carryOnom(name, this, out);
     else if (this.armed) carrySword(name, this, out);

@@ -6,6 +6,8 @@ export const STATUS_DEFS = {
   burn: { label: '燃焼', icon: '火', color: '#ff7a2a' }, // 燃えて、少しずつダメージ（擬音のメラメラ）
   haste: { label: '加速', icon: '»', color: '#6fe0ff' }, // 自分の移動速度 +50%（擬音のスー）
   power: { label: '攻撃UP', icon: '▲', color: '#ff7ac0' }, // 自分の攻撃力 +50%（擬音のドキドキ）
+  bleed: { label: '出血', icon: '血', color: '#e0182c' }, // 出血（チェンソーのスキル3）: 少しずつダメージ
+  gear: { label: '歯車', icon: '⚙', color: '#ff9a2a' }, // 自分の移動速度 +40%（チェンソーのスキル4）。足に歯車が生える
   slow: { label: '鈍足', icon: '▼', color: '#4ca8ff' }, // 移動速度が50%になる（矢印のスキル4）。胸に青い矢印が貼られる
 };
 

@@ -19,7 +19,7 @@ const CSS = `
 #weapon-select.out { opacity: 0; pointer-events: none; }
 #weapon-select h1 { margin: 0; font: 900 min(7vw, 36px)/1 system-ui, sans-serif; letter-spacing: 0.3em; text-shadow: 0 0 18px #4fd8ff, 0 3px 0 #04203d; }
 #weapon-select .sub { margin-top: -6px; font-size: 12px; letter-spacing: 0.3em; color: #9fd4ff; }
-#weapon-select .cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 1100px; }
+#weapon-select .cards { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; width: 100%; max-width: 1200px; }
 @media (max-width: 760px) { #weapon-select .cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 480px) { #weapon-select .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 #weapon-select .card { box-sizing: border-box; min-width: 0; padding: 12px 12px 14px; border-radius: 14px; text-align: center; cursor: pointer; position: relative;
@@ -83,7 +83,20 @@ const ONOM_ICON = `
   <text x="32" y="40" text-anchor="middle" font-family="'Hiragino Maru Gothic ProN','Yu Gothic',system-ui,sans-serif" font-weight="900" font-size="23" fill="#ff7a00" stroke="#5a2a00" stroke-width="1">ドン</text>
   <text x="32" y="92" text-anchor="middle" font-family="'Hiragino Maru Gothic ProN','Yu Gothic',system-ui,sans-serif" font-weight="900" font-size="15" fill="#ff3a1a" stroke="#4a0000" stroke-width="0.8" transform="rotate(-8 32 92)">メラメラ</text>
 </svg>`;
-const ICONS = { sword: SWORD_ICON, bat: BAT_ICON, fang: FANG_ICON, arrow: ARROW_ICON, onom: ONOM_ICON };
+// チェンソーのアイコン（オレンジの本体と、歯のある刃）
+const SAW_ICON = `
+<svg viewBox="0 0 64 110" aria-hidden="true" stroke-linejoin="round" stroke-linecap="round">
+  <g transform="rotate(-20 32 56)">
+    <rect x="22" y="2" width="20" height="62" rx="5" fill="#9aa3ad" stroke="#2a3138" stroke-width="2.4"/>
+    <rect x="26" y="6" width="12" height="54" rx="3" fill="#cfd6dd"/>
+    <path d="M20 4 H24 M20 12 H24 M20 20 H24 M20 28 H24 M20 36 H24 M20 44 H24 M20 52 H24 M40 4 H44 M40 12 H44 M40 20 H44 M40 28 H44 M40 36 H44 M40 44 H44 M40 52 H44" stroke="#1c1f24" stroke-width="3"/>
+    <rect x="14" y="62" width="36" height="30" rx="5" fill="#e8590c" stroke="#5a2204" stroke-width="2.6"/>
+    <rect x="20" y="92" width="24" height="12" rx="4" fill="#1c1f24" stroke="#000" stroke-width="2"/>
+    <circle cx="32" cy="76" r="5" fill="#fff" stroke="#5a2204" stroke-width="2"/>
+  </g>
+  <path d="M6 26 L14 22 M4 36 L12 34 M54 14 L60 8" stroke="#ffd54a" stroke-width="3"/>
+</svg>`;
+const ICONS = { sword: SWORD_ICON, bat: BAT_ICON, fang: FANG_ICON, arrow: ARROW_ICON, onom: ONOM_ICON, saw: SAW_ICON };
 const STAT_LABELS = { power: '攻撃力', speed: '速さ', reach: 'リーチ' };
 
 export class WeaponSelect {

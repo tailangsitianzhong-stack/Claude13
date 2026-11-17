@@ -6,6 +6,7 @@ import { createSword } from './Sword.js';
 import { createBat } from './Bat.js';
 import { createClaws, createFangs } from './Fang.js';
 import { createFist, createArrowSticker, ARROW_COLORS } from './Arrow.js';
+import { createChainsaw, createLegSaw, createHeadSaw, createGear } from './Chainsaw.js';
 import { StatusEffects } from './StatusEffects.js';
 import { SwordTrail } from '../effects/SwordTrail.js';
 
@@ -249,6 +250,31 @@ export function createCharacter(options = {}) {
     fangs = createFangs(R.head);
     neck.add(fangs);
   }
+  // ---- チェンソー（右手に1本。左手・脚・頭・足の歯車は、スキルと必殺技で生やす。武器選択で選んだときだけ使う）----
+  let chainsaw = null;
+  let trailSaw = null;
+  let sawL = null;
+  let legSawL = null;
+  let legSawR = null;
+  let headSaw = null;
+  let gearL = null;
+  let gearR = null;
+  if (o.sword) {
+    chainsaw = createChainsaw();
+    chainsaw.position.set(0, -R.hand / 2, 0);
+    chainsaw.visible = false;
+    joints.rWrist.add(chainsaw);
+    trailSaw = new SwordTrail(chainsaw, [1, 0.55, 0.15]);
+    sawL = createChainsaw();
+    sawL.position.set(0, -R.hand / 2, 0);
+    sawL.visible = false;
+    joints.lWrist.add(sawL);
+    legSawL = createLegSaw(R); joints.lKnee.add(legSawL);
+    legSawR = createLegSaw(R); joints.rKnee.add(legSawR);
+    headSaw = createHeadSaw(R.head); neck.add(headSaw);
+    gearL = createGear(1); joints.lAnkle.add(gearL);
+    gearR = createGear(-1); joints.rAnkle.add(gearR);
+  }
   // ---- 矢印（素手。右の前腕に加速の矢印、すねに上向きの矢印を貼る。武器選択で選んだときだけ使う）----
   let fist = null;
   let armSticker = null;
@@ -294,9 +320,11 @@ export function createCharacter(options = {}) {
     bat.visible = id === 'bat';
     claws.visible = clawsL.visible = fangs.visible = id === 'fang';
     great.visible = false;
-    held = id === 'bat' ? bat : id === 'fang' ? claws : id === 'arrow' || id === 'onom' ? fist : sword;
-    heldTrail = id === 'bat' ? trailBat : id === 'fang' ? trailFang : id === 'arrow' || id === 'onom' ? null : trail;
-    animator.armed = id === 'bat' ? 'bat' : id === 'fang' ? 'fang' : id === 'arrow' ? 'arrow' : id === 'onom' ? 'onom' : 'sword';
+    chainsaw.visible = id === 'saw';
+    sawL.visible = legSawL.visible = legSawR.visible = headSaw.visible = gearL.visible = gearR.visible = false; // 生やすものは、スキルのときだけ
+    held = id === 'bat' ? bat : id === 'fang' ? claws : id === 'saw' ? chainsaw : id === 'arrow' || id === 'onom' ? fist : sword;
+    heldTrail = id === 'bat' ? trailBat : id === 'fang' ? trailFang : id === 'saw' ? trailSaw : id === 'arrow' || id === 'onom' ? null : trail;
+    animator.armed = id === 'bat' ? 'bat' : id === 'fang' ? 'fang' : id === 'saw' ? 'saw' : id === 'arrow' ? 'arrow' : id === 'onom' ? 'onom' : 'sword';
   };
 
   const animator = new Animator({ group, joints, soles, scale: o.scale, armed: sword ? 'sword' : false });
@@ -360,6 +388,7 @@ export function createCharacter(options = {}) {
     if (trailGreat) trailGreat.update(dt);
     if (trailBat) trailBat.update(dt);
     if (trailFang) trailFang.update(dt);
+    if (trailSaw) trailSaw.update(dt);
     if (stars.visible) {
       starTime += dt;
       starMeshes.forEach((m, i) => {
@@ -398,6 +427,7 @@ export function createCharacter(options = {}) {
     claws,
     clawsL,
     fangs,
+    chainsaw, trailSaw, sawL, legSawL, legSawR, headSaw, gearL, gearR,
     trailFang,
     setTint,
     trail,

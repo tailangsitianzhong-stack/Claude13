@@ -51,6 +51,15 @@ export const DAMAGE = {
   onomGuru: 55,                   // スキル3: グルグル（気絶）
   onomDoki: 18, onomDoro: 20,     // スキル4・コンボ
   onomUltDokan: 45, onomUltZudon: 140, onomUltBan: 14, onomUltFinal: 70, // 必殺技
+  // チェンソー
+  saw: [55, 20, 62],              // 通常攻撃（斜め斬り・首に刺す（最初の一撃）・回転斬り）
+  sawStabTick: 13,                // 通常2: 首に刺している間、0.07 秒ごと
+  sawKnife: 25,                   // スキル1: ナイフ（当たると気絶 1 秒）
+  sawSlam: 95,                    // スキル1: 振り下ろし（範囲）
+  sawKick: 90,                    // スキル2: 飛び蹴り
+  sawArm: 20, sawArmFinal: 35,    // スキル3: 連続斬り1回・出血の一撃
+  sawBleedTick: 8,                // 出血: 0.5秒ごと（5秒間）
+  sawUltKick: 45, sawUltCut: 21, sawUltFinal: 170, // 必殺技: 飛び蹴り・斬りまくり1回・最後の一撃
   ultDagger: 40,                  // 必殺技: 小剣が刺さる
   ultSlash: 28,                   // 必殺技: 斬撃1回ぶん
   ultFinal: 160,                  // 必殺技: 最後の一撃

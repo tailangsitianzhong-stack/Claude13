@@ -16,6 +16,9 @@ import { ArrowController, ASKILL1 as ASK1, ASKILL2 as ASK2 } from './character/A
 import { ArrowDirector } from './game/ArrowDirector.js';
 import { ArrowUltimateDirector } from './cinematic/ArrowUltimate.js';
 import { OnomUltimateDirector } from './cinematic/OnomUltimate.js';
+import { ChainsawController, SSKILL1 as SSK1, SSKILL2 as SSK2 } from './character/ChainsawController.js';
+import { ChainsawDirector, BLEED_TICK } from './game/ChainsawDirector.js';
+import { ChainsawUltimateDirector } from './cinematic/ChainsawUltimate.js';
 import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4, ultPath } from './character/Controller.js';
 import { FIGHT, DAMAGE } from './character/Health.js';
 import { FightHud } from './ui/FightHud.js';
@@ -106,7 +109,7 @@ let p2 = npcs[0].c;
 let dummy = npcs[0].ctl;
 let activeNpcs = [npcs[0]];  // 今の試合に出ている相手
 const characters = [p1, ...npcs.map((n) => n.c)];
-for (const c of characters) { for (const t of [c.trail, c.trailGreat, c.trailBat, c.trailFang]) if (t) scene.add(t.mesh); }
+for (const c of characters) { for (const t of [c.trail, c.trailGreat, c.trailBat, c.trailFang, c.trailSaw]) if (t) scene.add(t.mesh); }
 
 // P1 をキーボードで操作。相手は、練習モードでは立っているだけ（攻撃を受けるとのけぞる）、バトルモードでは NPC として戦う
 let player = new CharacterController(p1, { bounds: stage.bounds });
@@ -115,7 +118,8 @@ const batPlayer = new BatController(p1, { bounds: stage.bounds }); // バット�
 const fangPlayer = new FangController(p1, { bounds: stage.bounds }); // 吸血牙を選んだときに使う
 const arrowPlayer = new ArrowController(p1, { bounds: stage.bounds }); // 矢印を選んだときに使う
 const onomPlayer = new OnomController(p1, { bounds: stage.bounds });   // 擬音を選んだときに使う
-const allPlayers = [swordPlayer, batPlayer, fangPlayer, arrowPlayer, onomPlayer];
+const sawPlayer = new ChainsawController(p1, { bounds: stage.bounds }); // チェンソーを選んだときに使う
+const allPlayers = [swordPlayer, batPlayer, fangPlayer, arrowPlayer, onomPlayer, sawPlayer];
 // 狙う相手・コンボ技で掴む相手を、今の相手にする
 function setFoe(n) {
   p2 = n.c; dummy = n.ctl;
@@ -209,7 +213,7 @@ function dealDamage(amount, at, kind) {
 }
 
 // スキルを使うたびに、ゲージが少し溜まる
-const GAUGE_ON_USE = new Set(['onomSkill1Start', 'onomSkill2Start', 'onomSkill3Start', 'onomSkill4Start', 'onomComboStart', 'arrowSkill1Start', 'arrowSkill2Start', 'arrowSkill3Start', 'arrowSkill4Start', 'arrowFinStart', 'fangSkill1Start', 'fangSkill2Start', 'fangSkill3Start', 'fangSkill4Start', 'batSkill1Start', 'batSkill2Start', 'batSkill3Start', 'batSkill4Start', 'skillStart', 'skill2Start', 'skill3Start', 'skill4Start', 'finisherGrab', 'airSlamStart']);
+const GAUGE_ON_USE = new Set(['onomSkill1Start', 'onomSkill2Start', 'onomSkill3Start', 'onomSkill4Start', 'onomComboStart', 'arrowSkill1Start', 'arrowSkill2Start', 'arrowSkill3Start', 'arrowSkill4Start', 'arrowFinStart', 'fangSkill1Start', 'fangSkill2Start', 'fangSkill3Start', 'fangSkill4Start', 'sawSkill1Start', 'sawSkill2Start', 'sawSkill3Start', 'sawSkill4Start', 'batSkill1Start', 'batSkill2Start', 'batSkill3Start', 'batSkill4Start', 'skillStart', 'skill2Start', 'skill3Start', 'skill4Start', 'finisherGrab', 'airSlamStart']);
 // 当たった瞬間のダメージ（イベントで知らせてくる技）
 const EVENT_DAMAGE = {
   skillStick: DAMAGE.skill1Stick, skillPunch: DAMAGE.skill1Punch, skillPullOut: DAMAGE.skill1PullOut, skillKick: DAMAGE.skill1Kick,
@@ -247,7 +251,10 @@ function handleAttackEvent(e) {
   if (player.state !== 'ult' && GAUGE_ON_USE.has(e.type)) player.gauge.add(FIGHT.gaugePerSkill);
   if (EVENT_DAMAGE[e.type]) dealDamage(EVENT_DAMAGE[e.type]);
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
-  if (e.type.startsWith('onom')) {
+  if (e.type.startsWith('saw')) {
+    sawDirector.onEvent(e);
+    if (e.type.startsWith('sawUlt') || e.type === 'sawSprout') ultDirector.onEvent(e); // 必殺技のムービーの演出（線・カメラ）
+  } else if (e.type.startsWith('onom')) {
     onomDirector.onEvent(e);
   } else if (e.type.startsWith('arrow')) {
     arrowDirector.onEvent(e);
@@ -322,8 +329,9 @@ function handleAttackEvent(e) {
     v1.set(p1.group.position.x + Math.sin(h) * 0.25, p1.height * (strong ? 0.75 : 0.62), p1.group.position.z + Math.cos(h) * 0.25);
     if (player.weaponId === 'arrow') arrowDirector.onSwing(e);
     else if (player.weaponId === 'fang') fangDirector.onSwing(e);
+    else if (player.weaponId === 'saw') sawDirector.onSwing(e);
     else if (player.weaponId !== 'bat') impact.wave(v1, h, WAVE_TILT[e.index], p1.height * (strong ? 1.15 : 0.95), p1.height * (strong ? 6 : 7.5)); // バットには斬撃波はない
-  } else if (e.type === 'slam' && player.weaponId !== 'fang' && player.weaponId !== 'arrow') {
+  } else if (e.type === 'slam' && player.weaponId !== 'fang' && player.weaponId !== 'arrow' && player.weaponId !== 'saw') {
     fx.shake(0.32);                       // 着地の衝撃
     fx.kick(0, -0.7, 0);
     // 叩きつけた地点に衝撃波の輪と土煙
@@ -663,6 +671,11 @@ function airSlamImpact() {
 
   // 地面: へこみとひび、まわりの地面がめくれ上がる隆起
   groundBreak.trigger(cx, cz, radius * 0.55);
+  if (player.weaponId === 'saw') { // チェンソー: 叩きつけて、地割れが広がる
+    groundCracks.start(cx, cz, radius * 1.2);
+    groundCracks.setCharge(1, clock.elapsedTime);
+    groundCracks.burst(p1.height);
+  }
   // 範囲いっぱいに広がる衝撃波の輪を重ね、土煙と光の粒を巻き上げる
   v1.set(cx, 0.03, cz);
   impact.ring(v1, radius, 0.5);
@@ -749,6 +762,7 @@ function checkHit() {
   const bat = player.weaponId === 'bat';
   const fang = player.weaponId === 'fang';
   const arrow = player.weaponId === 'arrow';
+  const saw = player.weaponId === 'saw';
   const atk = player.attacks[player.attackIndex];
   if (bat) {
     if (hadPrevTip) {
@@ -780,13 +794,13 @@ function checkHit() {
   const low = Math.min(bladeBase.y, bladeTip.y) < p2.group.position.y + p2.height * 1.05;
   let touching = low && (distToSegmentXZ(tx, tz, bladeBase, bladeTip) < r
     || (hadPrevTip && distToSegmentXZ(tx, tz, prevTip, bladeTip) < r));
-  if ((fang || arrow) && atk.bite) {
-    // 噛みつき・素手の打撃: 爪や拳ではなく、正面の近くにいる相手に当たる
+  if ((fang || arrow || saw) && atk.bite) {
+    // 噛みつき・素手の打撃・チェンソーの首刺し/回転斬り: 刃ではなく、正面（回転斬りは全方向）の近くにいる相手に当たる
     const ddx = tx - p1.group.position.x;
     const ddz = tz - p1.group.position.z;
     const dd = Math.hypot(ddx, ddz) || 1;
     const hy = p1.group.rotation.y;
-    touching = (Math.sin(hy) * ddx + Math.cos(hy) * ddz) / dd > 0.45 && dd < atk.reach * p1.scale;
+    touching = (atk.spin || (Math.sin(hy) * ddx + Math.cos(hy) * ddz) / dd > 0.45) && dd < atk.reach * p1.scale;
   }
   prevTip.copy(bladeTip);
   hadPrevTip = true;
@@ -798,14 +812,15 @@ function checkHit() {
 
   player.hitDone = true;
   // 3段目を当てたら、少しの間だけコンボ技（掴み上げ）を出せる
-  if (player.attackIndex === 2 && !fang && !arrow) player.finisherWindow = FINISHER.window; // 矢印は、押さえつけが終わったときに出る
+  if (player.attackIndex === 2 && !fang && !arrow && !saw) player.finisherWindow = FINISHER.window; // 矢印は、押さえつけが終わったときに出る
   const power = player.attacks[player.attackIndex].power;
   const strong = power > 1;
   if (fang && atk.grab) player.startNeckBite(); // 首に噛みつく: つかんで離さない
   else if (arrow && atk.grab) player.startPress(); // 下向き矢印で、地面に押さえつける
-  else if (arrow && atk.launch) dummy.launch(dx, dz, 62, 13); // 加速パンチ: 遠くへ吹っ飛ばす
+  else if (saw && atk.grab) player.startSawStab(); // 首元にチェンソーを刺して、連続ダメージ
+  else if ((arrow || saw) && atk.launch) dummy.launch(dx, dz, 62, 13); // 加速パンチ・チェンソーの斜め斬り: 遠くへ吹っ飛ばす
   else dummy.hit(dx, dz, power);
-  dealDamage((bat ? DAMAGE.bat : fang ? DAMAGE.fang : arrow ? DAMAGE.arrow : DAMAGE.attack)[player.attackIndex]);
+  dealDamage((bat ? DAMAGE.bat : fang ? DAMAGE.fang : arrow ? DAMAGE.arrow : saw ? DAMAGE.saw : DAMAGE.attack)[player.attackIndex]);
 
   // 手応え: 時間を一瞬止め、画面を揺らし、ぐっと寄る
   hitStop = strong ? 0.13 : 0.07;
@@ -826,6 +841,7 @@ function checkHit() {
   impact.streak(v1, slashWorld, camera, p2.height * (strong ? 2.2 : 1.6));
   if (strong) impact.ring(p2.group.position, p2.height * 1.3, 0.35);
   if (fang) fangDirector.onBiteHit(player.attackIndex);
+  if (saw) sawDirector.onHit(player.attackIndex);
   if (arrow) arrowDirector.onHit(player.attackIndex);
   if (bat) { // 風圧: 足もとに広がる輪と、土ぼこり。振りが強いほど大きい
     impact.ring(p2.group.position, p2.height * (1.2 + 1.8 * windStrength), 0.4);
@@ -912,6 +928,16 @@ const arrowUlt = new ArrowUltimateDirector({
   hooks: swordUlt.ctx.hooks, arrow: arrowDirector,
 });
 
+// チェンソー: 通常攻撃の血しぶき・首刺し・ナイフ・振り下ろし・飛び蹴り・連続斬り・出血と、必殺技（闇夜の森のムービー）
+const sawDirector = new ChainsawDirector({
+  scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player, groundCracks,
+  hooks: { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) },
+});
+const sawUlt = new ChainsawUltimateDirector({
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
+  hooks: swordUlt.ctx.hooks,
+});
+
 // ---- モード（練習 / バトル）と、NPC ----
 //   練習モード   : 相手（npcs[0]）は立っているだけ。倒すと、しばらくして復活する
 //   バトルモード : 自分を入れて 2〜4 人。NPC は考えて動き、自分を含めてお互いを攻撃する。最後まで立っていた人の勝ち
@@ -929,7 +955,7 @@ const foeAlive = (n) => n.alive && !n.dying && !n.ctl.health.ko;
 function resetFighter(k) {
   const c = k.c;
   const g = c.group;
-  for (const fn of ['cancelBat', 'cancelFang', 'cancelArrow', 'cancelOnom']) if (typeof k[fn] === 'function') k[fn]();
+  for (const fn of ['cancelBat', 'cancelFang', 'cancelArrow', 'cancelOnom', 'cancelSaw']) if (typeof k[fn] === 'function') k[fn]();
   k.state = 'ground';
   k.vx = k.vy = k.vz = 0;
   k.timer = 0; k.downTimer = 0;
@@ -1089,6 +1115,17 @@ function npcLand(n, t) {
 let flashPlayer = 0;
 let flashPlayerOn = false;
 
+// 出血（チェンソー）: 今狙っている相手の分は、ここで 0.5 秒ごとにダメージを入れる（通信対戦の相手は、届いた状態異常を見て数える）
+let bleedAcc = 0;
+function bleedTick(dt) {
+  if (!dummy.status.has('bleed') || matchOver || ultDirector.active) { bleedAcc = 0; return; }
+  bleedAcc += dt;
+  while (bleedAcc >= BLEED_TICK) {
+    bleedAcc -= BLEED_TICK;
+    dealDamage(DAMAGE.sawBleedTick, v1.set(p2.group.position.x, p2.group.position.y + p2.height * 0.8, p2.group.position.z), '');
+  }
+}
+
 function updateNpcs(dt, realDt) {
   if (mode === 'online') {
     // 通信対戦: 相手のキャラは、届いた情報のとおりに動かす（自分の必殺技のムービー中は、ムービーが位置を決める）
@@ -1116,6 +1153,10 @@ function updateNpcs(dt, realDt) {
       n.burnAcc += dt;
       while (n.burnAcc >= 0.5) { n.burnAcc -= 0.5; damageNpc(n, DAMAGE.onomBurnTick); }
     } else n.burnAcc = 0;
+    if (k !== dummy && k.status.has('bleed') && foeAlive(n)) {
+      n.bleedAcc = (n.bleedAcc ?? 0) + dt;
+      while (n.bleedAcc >= BLEED_TICK) { n.bleedAcc -= BLEED_TICK; damageNpc(n, DAMAGE.sawBleedTick); }
+    } else n.bleedAcc = 0;
   }
 }
 
@@ -1138,7 +1179,7 @@ function faceFoes(dt) {
 // キャラ同士はすり抜けない
 function separateFighters() {
   // 自分は、掴み技などの最中はすり抜ける（今の相手との間だけ）
-  const grappling = ((player.weaponId === 'fang' || player.weaponId === 'arrow' || player.weaponId === 'onom') && player.state.startsWith('bskill')) || player.state === 'finisher' || player.state === 'ult' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
+  const grappling = ((player.weaponId === 'fang' || player.weaponId === 'arrow' || player.weaponId === 'onom' || player.weaponId === 'saw') && player.state.startsWith('bskill')) || player.state === 'finisher' || player.state === 'ult' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
   const bodies = [{ c: p1, k: player, isP: true }];
   for (const n of activeNpcs) if (n.alive && !n.dying) bodies.push({ c: n.c, k: n.ctl, n });
   for (let i = 0; i < bodies.length; i++) {
@@ -1274,7 +1315,7 @@ let rematchMine = false;
 let rematchTheirs = false;
 const moveLocked = (k) => { const s = k.state; return s === 'ult' || s === 'skill' || s === 'skill2' || s === 'skill3' || s === 'skill4' || s === 'airSlam' || s === 'finisher' || s.startsWith('bskill'); }; // 技の最中は、相手の技を受けない
 function cancelMoves(k) {
-  for (const fn of ['cancelBat', 'cancelFang', 'cancelArrow', 'cancelOnom']) if (typeof k[fn] === 'function') k[fn]();
+  for (const fn of ['cancelBat', 'cancelFang', 'cancelArrow', 'cancelOnom', 'cancelSaw']) if (typeof k[fn] === 'function') k[fn]();
   k.sk = null; k.s2 = null; k.s3 = null; k.s4 = null; if ('bs' in k) k.bs = null;
   k.attackActive = false; k.c.animator.trailOn = false;
 }
@@ -1415,11 +1456,12 @@ function onWeaponChosen(id) {
   lastWeapon = id;
   // 選んだ武器に切り替える: キャラの持ち物と、操作するコントローラ
   p1.setWeapon(id);
-  player = id === 'bat' ? batPlayer : id === 'fang' ? fangPlayer : id === 'arrow' ? arrowPlayer : id === 'onom' ? onomPlayer : swordPlayer;
-  ultDirector = id === 'bat' ? batUlt : id === 'fang' ? fangUlt : id === 'arrow' ? arrowUlt : id === 'onom' ? onomUlt : swordUlt;
+  player = id === 'saw' ? sawPlayer : id === 'bat' ? batPlayer : id === 'fang' ? fangPlayer : id === 'arrow' ? arrowPlayer : id === 'onom' ? onomPlayer : swordPlayer;
+  ultDirector = id === 'saw' ? sawUlt : id === 'bat' ? batUlt : id === 'fang' ? fangUlt : id === 'arrow' ? arrowUlt : id === 'onom' ? onomUlt : swordUlt;
   touch.setWeapon(id); // ボタンのアイコンを、武器に合わせる
   const hud = document.getElementById('hud');
   if (id === 'bat') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（横殴り→一回転→ボール）　T / G: 必殺技　K / E: スキル1（金属バット弾）→ 使用後はスキル3（ボール連打）　L / Q: スキル2（バット投げ）→ 使用後はスキル4（空中バット）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  if (id === 'saw') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ　左クリック / J: 攻撃（斜め斬りで吹っ飛ばす→首に刺す→回転斬り）　ジャンプ中に攻撃: 叩きつけて地割れ　T / G: 必殺技（引き金→飛び蹴り→解体）　K / E: スキル1（ナイフ→振り下ろし）→ 使用後はスキル3（両手チェンソーで連続斬り・出血）　L / Q: スキル2（足のチェンソーで飛び蹴り）→ 使用後はスキル4（歯車で移動+40%）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   if (id === 'onom') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（ドン→グラグラ→メラメラ）　3段目を当てたあとの Space: コンボ（ドロドロ）　T / G: 必殺技（ドカン・ズドン・バンバン）　K / E: スキル1（ドカン）→ 使用後はスキル3（グルグル）　L / Q: スキル2（スー）→ 使用後はスキル4（ドキドキ）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   if (id === 'arrow') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（加速パンチ→ダッシュ蹴り→押さえつけ連打）　3段目を当てたあとの Space: コンボ（地面を隆起）　T / G: 必殺技（前向き矢印）　K / E: スキル1（砲弾）→ 使用後はスキル3（加速ダッシュ）　L / Q: スキル2（高く飛んで叩きつけ）→ 使用後はスキル4（鈍足矢印）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   if (id === 'fang') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ　左クリック / J: 攻撃（噛みつき→爪の薙ぎ払い→首に噛みつく）　ジャンプ中に攻撃: かぎ爪×3　T / G: 必殺技（赤い宝石）　K / E: スキル1（赤い斬撃・吸血）→ 使用後はスキル3（分身）　L / Q: スキル2（巨大蝙蝠の突進）→ 使用後はスキル4（足を蝙蝠にして回転）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
@@ -1480,7 +1522,7 @@ function setLoad(p, msg) {
 }
 // root の舞台（null = 試合のステージ）を表示した状態で、すべてのものを（画面の外のものも）一度描く
 function warmRender(root) {
-  const cine = [batUlt.center.group, fangUlt.castle.group, arrowUlt.yard.group, onomUlt.world.group];
+  const cine = [batUlt.center.group, fangUlt.castle.group, arrowUlt.yard.group, onomUlt.world.group, sawUlt.world.group];
   const saved = [];
   // 光源は、そのまま（光源の数が変わると、シェーダーが別物になる。試合中と同じ数で作る）
   scene.traverse((o) => { saved.push([o, o.visible, o.frustumCulled]); if (!o.isLight) o.visible = true; o.frustumCulled = false; });
@@ -1498,7 +1540,7 @@ async function loadAll() {
   for (const t of allWordTextures()) renderer.initTexture(t);   // 画像を、先に GPU へ送っておく（初めて出るときに、止まらない）
   setLoad(0.18, 'エフェクトを準備しています');
   await nextFrame();
-  const places = [['試合のステージ', null], ['バッティングセンター', batUlt.center.group], ['ドラキュラ城', fangUlt.castle.group], ['ゴミ処理場', arrowUlt.yard.group], ['擬音の世界', onomUlt.world.group]];
+  const places = [['試合のステージ', null], ['バッティングセンター', batUlt.center.group], ['ドラキュラ城', fangUlt.castle.group], ['ゴミ処理場', arrowUlt.yard.group], ['擬音の世界', onomUlt.world.group], ['闇夜の森', sawUlt.world.group]];
   for (let i = 0; i < places.length; i++) {
     setLoad(0.25 + (0.7 * i) / places.length, places[i][0] + 'を読み込んでいます');
     await nextFrame();
@@ -1574,6 +1616,7 @@ function step(realDt) {
   const cmd = readCommand();
   player.update(dt, matchOver === 'lose' ? NO_INPUT : cmd);
   updateNpcs(dt, realDt);
+  bleedTick(dt);
   input.endFrame();
   // コンボ技を出せる間、ジャンプボタン（と PC の案内）を切り替える
   const canFinish = player.finisherWindow > 0 && player.canGrab();
@@ -1583,8 +1626,8 @@ function step(realDt) {
   // 剣以外の武器（バット・吸血牙）は、player.bs が今のスキルの進行状況。スキルの待ち時間は武器ごとに違う
   const own = player.weaponId !== 'sword';
   const bs = own ? player.bs?.n : 0;
-  const cd1 = player.weaponId === 'onom' ? OSK1.cooldown : player.weaponId === 'arrow' ? ASK1.cooldown : player.weaponId === 'fang' ? FSK1.cooldown : player.weaponId === 'bat' ? BSKILL1.cooldown : SKILL1.cooldown;
-  const cd2 = player.weaponId === 'onom' ? OSK2.cooldown : player.weaponId === 'arrow' ? ASK2.cooldown : player.weaponId === 'fang' ? FSK2.cooldown : player.weaponId === 'bat' ? BSKILL2.cooldown : SKILL2.cooldown;
+  const cd1 = player.weaponId === 'saw' ? SSK1.cooldown : player.weaponId === 'onom' ? OSK1.cooldown : player.weaponId === 'arrow' ? ASK1.cooldown : player.weaponId === 'fang' ? FSK1.cooldown : player.weaponId === 'bat' ? BSKILL1.cooldown : SKILL1.cooldown;
+  const cd2 = player.weaponId === 'saw' ? SSK2.cooldown : player.weaponId === 'onom' ? OSK2.cooldown : player.weaponId === 'arrow' ? ASK2.cooldown : player.weaponId === 'fang' ? FSK2.cooldown : player.weaponId === 'bat' ? BSKILL2.cooldown : SKILL2.cooldown;
   const alt1 = own ? player.skill3Ready || bs === 3 : player.skill3Ready || player.state === 'skill3';
   const alt2 = own ? player.skill4Ready || bs === 4 : player.skill4Ready || player.state === 'skill4';
   touch.setSkillAlt(0, alt1);
@@ -1646,6 +1689,7 @@ function step(realDt) {
   guard('fangDirector', () => fangDirector.update(dt));
   guard('arrowDirector', () => arrowDirector.update(dt));
   guard('onomDirector', () => onomDirector.update(dt));
+  guard('sawDirector', () => sawDirector.update(dt));
   guard('batSwarm', () => batSwarm.update(dt, clock.elapsedTime));
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
   ultDirector.update(realDt);
@@ -1690,7 +1734,7 @@ function step(realDt) {
   if (!window.game.skipRender) renderer.render(scene, camera); // skipRender: 確認用の早送り
   fx.restore();
 }
-window.game.onom = onomDirector; window.game.renderer = renderer; window.game.arrow = arrowDirector; window.game.fang = fangDirector; window.game.swarm = batSwarm;
+window.game.saw = sawDirector; window.game.onom = onomDirector; window.game.renderer = renderer; window.game.arrow = arrowDirector; window.game.fang = fangDirector; window.game.swarm = batSwarm;
 window.game.step = step; // manual=true のとき、外からコマ送りできる（動作確認用）
 
 const clock = new THREE.Clock();

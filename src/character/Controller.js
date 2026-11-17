@@ -1315,7 +1315,7 @@ export class CharacterController {
     // 気絶中は、立っているだけの状態になり、入力は受け付けない
     if (this.status.has('stun') && this.state === 'ground') cmd = STUN_CMD;
     const moving = Math.hypot(cmd.x, cmd.z) > 0.01;
-    const topSpeed = (cmd.run ? MOVE.runSpeed : MOVE.walkSpeed) * S * (this.status.has('slow') ? 0.5 : 1) * (this.status.has('haste') ? 1.5 : 1); // 鈍足: 移動速度 50% / 加速: 150%
+    const topSpeed = (cmd.run ? MOVE.runSpeed : MOVE.walkSpeed) * S * (this.status.has('slow') ? 0.5 : 1) * (this.status.has('haste') ? 1.5 : 1) * (this.status.has('gear') ? 1.4 : 1); // 鈍足: 移動速度 50% / 加速: 150% / 歯車: 140%
 
     this.slamCooldown = Math.max(0, this.slamCooldown - dt);
     this.finisherWindow = Math.max(0, this.finisherWindow - dt);
