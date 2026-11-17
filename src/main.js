@@ -8,6 +8,7 @@ import { FangController, FSKILL1 as FSK1, FSKILL2 as FSK2, FANG_ATTACKS } from '
 import { FangDirector } from './game/FangDirector.js';
 import { FangUltimateDirector } from './cinematic/FangUltimate.js';
 import { BatSwarm } from './character/FangBats.js';
+import { BUILD } from './version.js';
 import { ArrowController, ASKILL1 as ASK1, ASKILL2 as ASK2 } from './character/ArrowController.js';
 import { ArrowDirector } from './game/ArrowDirector.js';
 import { ArrowUltimateDirector } from './cinematic/ArrowUltimate.js';
@@ -880,6 +881,7 @@ document.body.classList.add('pre-match');
 // ロード: 後から作ると重くなるものを先に作り、すべての見た目（ステージ・ムービーの舞台・エフェクト）を一度描いて、
 // シェーダーのコンパイルと、画像・形の転送を済ませておく。試合中に、初めての技を出しても止まらないようにするため。
 const bootEl = document.getElementById('boot');
+document.getElementById('ver').textContent = 'build: ' + BUILD;
 const startBtn = document.getElementById('start-btn');
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 function setLoad(p, msg) {
@@ -1120,7 +1122,7 @@ function reportRuntimeError(label, err) {
   const stack = err && err.stack ? String(err.stack).split('\n').slice(0, 3).join(' / ') : '';
   box.hidden = false;
   box.style.pointerEvents = 'auto';
-  box.textContent = '実行中のエラー(' + label + '): ' + (err && err.message ? err.message : err) + (stack ? '  [' + stack + ']' : '') + '  （タップで閉じる）';
+  box.textContent = '[' + BUILD + '] 実行中のエラー(' + label + '): ' + (err && err.message ? err.message : err) + (stack ? '  [' + stack + ']' : '') + '  （タップで閉じる）';
   box.onclick = () => { box.hidden = true; };
 }
 window.game.reportError = reportRuntimeError;
