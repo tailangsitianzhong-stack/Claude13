@@ -102,7 +102,10 @@
       // 起動に失敗したら理由を画面に出す（空色の画面のまま止まらないように）
       (function () {
         var box = document.getElementById('boot-error');
-        function show(msg) { if (window.game) return; box.hidden = false; box.textContent = '読み込みに失敗しました: ' + msg; }
+        function show(msg) {
+          if (window.game) { if (window.game.reportError) return; box.hidden = false; box.textContent = '実行中のエラー: ' + msg + '  （タップで閉じる）'; box.style.pointerEvents = 'auto'; box.onclick = function () { box.hidden = true; }; return; }
+          box.hidden = false; box.textContent = '読み込みに失敗しました: ' + msg;
+        }
         addEventListener('error', function (e) { show(e.message || (e.target && (e.target.src || e.target.href)) || 'unknown'); }, true);
         addEventListener('unhandledrejection', function (e) { show(String(e.reason && e.reason.message || e.reason)); });
       })();

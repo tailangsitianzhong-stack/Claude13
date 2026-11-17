@@ -191,6 +191,10 @@ function startKO() {
 }
 
 function onAttackEvent(e) {
+  // 演出の例外で、ゲームの進行（ダメージ・状態）まで止めない
+  try { handleAttackEvent(e); } catch (err) { window.game.reportError?.('event ' + e.type, err); }
+}
+function handleAttackEvent(e) {
   if (player.state !== 'ult' && GAUGE_ON_USE.has(e.type)) player.gauge.add(FIGHT.gaugePerSkill);
   if (EVENT_DAMAGE[e.type]) dealDamage(EVENT_DAMAGE[e.type]);
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
@@ -1050,10 +1054,10 @@ function step(realDt) {
   p1.update(dt, checkHit); // 姿勢を進めるたびに、その時点の刃の位置で当たり判定
   p2.update(dt);
   sparks.update(dt, camera, p1.height * 1.1);
-  batDirector.update(dt);
-  fangDirector.update(dt);
-  arrowDirector.update(dt);
-  batSwarm.update(dt, clock.elapsedTime);
+  guard('batDirector', () => batDirector.update(dt));
+  guard('fangDirector', () => fangDirector.update(dt));
+  guard('arrowDirector', () => arrowDirector.update(dt));
+  guard('batSwarm', () => batSwarm.update(dt, clock.elapsedTime));
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
   ultDirector.update(realDt);
   groundBreak.update(realDt);
@@ -1100,7 +1104,33 @@ window.game.renderer = renderer; window.game.arrow = arrowDirector; window.game.
 window.game.step = step; // manual=true のとき、外からコマ送りできる（動作確認用）
 
 const clock = new THREE.Clock();
+// 演出の更新で例外が出ても、そのコマの残り（描画まで）は続ける
+function guard(label, fn) { try { fn(); } catch (err) { window.game.reportError?.(label, err); } }
+
+// 1回のエラーで、ゲーム全体が止まらないように: three の描画ループは、コールバックが例外を出すと、次のコマを予約せず、
+// 画面が最後のコマのまま固まる。例外は、画面の下に出して（タップで消える）、ゲームは動かし続ける。
+const reported = new Set();
+function reportRuntimeError(label, err) {
+  console.error(label, err);
+  const key = label + ':' + (err && err.message);
+  if (reported.has(key)) return;
+  reported.add(key);
+  const box = document.getElementById('boot-error');
+  if (!box) return;
+  const stack = err && err.stack ? String(err.stack).split('\n').slice(0, 3).join(' / ') : '';
+  box.hidden = false;
+  box.style.pointerEvents = 'auto';
+  box.textContent = '実行中のエラー(' + label + '): ' + (err && err.message ? err.message : err) + (stack ? '  [' + stack + ']' : '') + '  （タップで閉じる）';
+  box.onclick = () => { box.hidden = true; };
+}
+window.game.reportError = reportRuntimeError;
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 1 / 20);
-  if (!window.game.manual) step(dt);
+  if (window.game.manual) return;
+  try {
+    step(dt);
+  } catch (err) {
+    reportRuntimeError('step', err);
+    try { renderer.render(scene, camera); } catch (e2) { /* 描けなくても、ループは止めない */ }
+  }
 });
