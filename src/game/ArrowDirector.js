@@ -71,16 +71,21 @@ export class ArrowDirector {
     // 床の矢印（プール）
     this.floor = [];
     for (let i = 0; i < 10; i++) { const f = createFloorArrow(ARROW_COLORS.accel, 0.25); f.userData.item = { t: 9, life: 1, delay: 0 }; scene.add(f); this.floor.push(f); }
-    // 相手に貼る矢印（胸の正面）: 下向き・鈍足・引き寄せ（必殺技は ArrowUltimate が使う）
-    this.foeStickers = {};
+    // 相手に貼る矢印（胸の正面）: 下向き・鈍足・引き寄せ（必殺技は ArrowUltimate が使う）。
+    // 相手が複数いる（バトルモード）ときは、相手ごとに1組ずつ持つ。今狙っている相手（ctx.p2）の組が foeStickers
+    this.stickerSets = new Map();
     const R = RIG;
-    for (const [name, color, rotZ, scale] of [['down', ARROW_COLORS.down, Math.PI, 0.95], ['slow', ARROW_COLORS.slow, Math.PI, 0.95], ['pull', ARROW_COLORS.pull, Math.PI, 1.0]]) {
-      const st = createArrowSticker(color, { scale });
-      st.rotation.z = rotZ;
-      st.position.set(0, R.chestTop - R.chest[1] / 2, R.chest[2] / 2 + 0.05);
-      st.visible = false;
-      p2.joints.waist.add(st);
-      this.foeStickers[name] = st;
+    for (const foe of ctx.foes ?? [p2]) {
+      const set = {};
+      for (const [name, color, rotZ, scale] of [['down', ARROW_COLORS.down, Math.PI, 0.95], ['slow', ARROW_COLORS.slow, Math.PI, 0.95], ['pull', ARROW_COLORS.pull, Math.PI, 1.0]]) {
+        const st = createArrowSticker(color, { scale });
+        st.rotation.z = rotZ;
+        st.position.set(0, R.chestTop - R.chest[1] / 2, R.chest[2] / 2 + 0.05);
+        st.visible = false;
+        foe.joints.waist.add(st);
+        set[name] = st;
+      }
+      this.stickerSets.set(foe, set);
     }
     // 砲弾（立体の矢印）と、鈍足矢印の弾
     // ロード中に作っておく（試合中に作ると、重くなる）: 砲弾2つ、鈍足矢印の弾1つ
@@ -105,6 +110,7 @@ export class ArrowDirector {
   }
 
   get player() { return this.ctx.getPlayer(); }
+  get foeStickers() { return this.stickerSets.get(this.ctx.p2); }
 
   stickerOn(st, on) { if (st) st.visible = on; }
 
@@ -375,6 +381,7 @@ export class ArrowDirector {
     for (const st of Object.values(this.foeStickers)) if (st.visible) st.userData.setGlow(1, time);
     // 鈍足: 状態が切れたら、矢印をはがす
     if (!dummy.status.has('slow')) this.foeStickers.slow.visible = false;
+    for (const [foe, set] of this.stickerSets) if (foe !== p2 && !foe.status.has('slow')) set.slow.visible = false; // 狙う相手が変わっても、はがす
     // 床の矢印: ぽんと現れて、すっと消える
     for (const f of this.floor) {
       const it = f.userData.item;

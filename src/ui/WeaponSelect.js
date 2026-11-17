@@ -88,12 +88,15 @@ const STAT_LABELS = { power: '攻撃力', speed: '速さ', reach: 'リーチ' };
 
 export class WeaponSelect {
   // hold: true なら、show() が呼ばれるまで表示しない（タイトル・ロードのあとに出す）
-  constructor(onSelect, { hold = false } = {}) {
-    const style = document.createElement('style');
-    style.textContent = CSS;
-    document.head.appendChild(style);
+  constructor(onSelect, { hold = false, initial = DEFAULT_WEAPON } = {}) {
+    if (!document.getElementById('weapon-select-style')) {
+      const style = document.createElement('style');
+      style.id = 'weapon-select-style';
+      style.textContent = CSS;
+      document.head.appendChild(style);
+    }
     this.onSelect = onSelect;
-    this.selected = DEFAULT_WEAPON;
+    this.selected = initial;
     this.root = document.createElement('div');
     this.root.id = 'weapon-select';
     this.held = hold;

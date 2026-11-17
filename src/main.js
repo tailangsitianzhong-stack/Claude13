@@ -19,6 +19,9 @@ import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL
 import { FIGHT, DAMAGE } from './character/Health.js';
 import { FightHud } from './ui/FightHud.js';
 import { WeaponSelect } from './ui/WeaponSelect.js';
+import { ModeSelect } from './ui/ModeSelect.js';
+import { BattleHud } from './ui/BattleHud.js';
+import { NPC_LOOKS, NpcBrain, createNameTag } from './game/Npc.js';
 import { getWeapon } from './game/weapons.js';
 import { CineOverlay } from './cinematic/CineOverlay.js';
 import { UltimateDirector } from './cinematic/UltimateDirector.js';
@@ -60,31 +63,60 @@ scene.add(sun);
 const stage = createStage();
 scene.add(stage.group);
 
-// プレイヤー2人を向かい合わせに配置
+// プレイヤーと、相手（NPC）を向かい合わせに配置
 const p1 = createCharacter({ name: 'P1', shirt: 0x1e88e5, pants: 0x2e3a4b, hair: 0x4a2c17, hairStyle: 'short', face: 'smile', sleeves: 'short' });
 p1.group.position.set(-0.6, 0, 0);
 p1.group.rotation.y = Math.PI / 2;
-const p2 = createCharacter({ name: 'P2', shirt: 0xe53935, pants: 0x3b3b3b, hair: 0x1b1b1b, hairStyle: 'spiky', face: 'angry', sleeves: 'long' });
-p2.group.position.set(0.6, 0, 0);
-p2.group.rotation.y = -Math.PI / 2;
-p2.animator.play('fight', 0); // P2 は構えポーズで待機
-scene.add(p1.group, p2.group);
-const characters = [p1, p2];
+scene.add(p1.group);
+
+// 相手（NPC）は最大3人。練習モードでは [0] だけが立っている（サンドバッグ）。バトルモードでは、人数に応じて 1〜3 人が戦う。
+// 最初に全員を作っておく（試合中に作ると重くなるため。ロードのシェーダー準備にも含まれる）
+const npcs = [];
+for (let i = 0; i < NPC_LOOKS.length; i++) {
+  const look = NPC_LOOKS[i];
+  const c = createCharacter({ ...look, name: look.name });
+  c.group.position.set(0.6 + i * 0.5, 0, 0);
+  c.group.rotation.y = -Math.PI / 2;
+  c.animator.play('fight', 0); // 構えポーズで待機
+  const ctl = new CharacterController(c, { bounds: stage.bounds });
+  ctl.idle = 'fight';
+  // 頭の上の名前札（バトルモードだけ）。大きさ・高さは身長に合わせる
+  const tag = createNameTag(look.name, look.tag);
+  const h = c.height / c.scale;
+  tag.scale.set(h * 0.85, h * 0.2125, 1);
+  tag.position.set(0, h + 0.9, 0);
+  c.group.add(tag);
+  scene.add(c.group);
+  c.group.visible = i === 0;
+  npcs.push({ id: i, name: look.name, c, ctl, tag, brain: new NpcBrain(0.45 + 0.15 * i), alive: i === 0, dying: false, deathT: 0, flashT: 0, burnAcc: 0 });
+}
+const youTag = createNameTag('YOU', '#7fd0ff');
+{ const h = p1.height / p1.scale; youTag.scale.set(h * 0.65, h * 0.1625, 1); youTag.position.set(0, h + 0.9, 0); p1.group.add(youTag); }
+// 今狙っている相手（練習モードでは常に npcs[0]。バトルモードでは、いちばん近い相手に切り替わる）。
+// 技の処理（ダメージ・演出）は、すべてこの p2 / dummy に対して行う
+let p2 = npcs[0].c;
+let dummy = npcs[0].ctl;
+let activeNpcs = [npcs[0]];  // 今の試合に出ている相手
+const characters = [p1, ...npcs.map((n) => n.c)];
 for (const c of characters) { for (const t of [c.trail, c.trailGreat, c.trailBat, c.trailFang]) if (t) scene.add(t.mesh); }
 
-// P1 をキーボードで操作。P2 は今のところ立っているだけ（攻撃を受けるとのけぞる）
+// P1 をキーボードで操作。相手は、練習モードでは立っているだけ（攻撃を受けるとのけぞる）、バトルモードでは NPC として戦う
 let player = new CharacterController(p1, { bounds: stage.bounds });
 const swordPlayer = player;
 const batPlayer = new BatController(p1, { bounds: stage.bounds }); // バットを選んだときに使う
-const dummy = new CharacterController(p2, { bounds: stage.bounds });
 const fangPlayer = new FangController(p1, { bounds: stage.bounds }); // 吸血牙を選んだときに使う
 const arrowPlayer = new ArrowController(p1, { bounds: stage.bounds }); // 矢印を選んだときに使う
 const onomPlayer = new OnomController(p1, { bounds: stage.bounds });   // 擬音を選んだときに使う
-for (const pl of [swordPlayer, batPlayer, fangPlayer, arrowPlayer, onomPlayer]) { pl.target = p2; pl.victim = dummy; } // 狙う相手・コンボ技で掴む相手
-dummy.idle = 'fight';
+const allPlayers = [swordPlayer, batPlayer, fangPlayer, arrowPlayer, onomPlayer];
+// 狙う相手・コンボ技で掴む相手を、今の相手にする
+function setFoe(n) {
+  p2 = n.c; dummy = n.ctl;
+  for (const pl of allPlayers) { pl.target = p2; pl.victim = dummy; }
+}
+setFoe(npcs[0]);
 const statusHud = new StatusHud('P2'); // 相手の状態異常の表示枠
 const statusHudP1 = new StatusHud('P1', { id: 'status-hud-p1', left: 12, top: 96 }); // 自分の状態異常（加速・攻撃UP）の表示枠
-const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, toggleStance: false };
+const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, skill: false, skillHold: false, skill2: false, ult: false, toggleStance: false };
 
 // 三人称の追従カメラ。最初は P1 の真後ろから
 const view = new ThirdPersonCamera(camera, renderer.domElement, { bounds: stage.cameraBounds });
@@ -164,7 +196,7 @@ function dealDamage(amount, at, kind) {
   if (player.state !== 'ult') player.gauge.add(dealt * FIGHT.gaugePerDamage); // 必殺技の最中は溜まらない
   const where = at ?? v1.set(p2.group.position.x, p2.group.position.y + p2.height * 0.7, p2.group.position.z);
   fightHud.popDamage(where, dealt, kind ?? (dealt >= 90 ? 'huge' : dealt >= 45 ? 'big' : ''));
-  if (dummy.health.ko) onKO();
+  if (dummy.health.ko && mode === 'practice') onKO(); // バトルモードの脱落は、scanDeaths が決める
   return dealt;
 }
 
@@ -398,23 +430,23 @@ function onSkill4Event(e) {
   }
 }
 
-// 吹き飛ばされた相手の着地・壁への激突
-function onDummyEvent(e) {
+// 吹き飛ばされた相手（n）の着地・壁への激突
+function onFoeEvent(n, e) {
+  const q = n.c;
   if (e.type === 'launchLand') {
     v1.set(e.x, 0.03, e.z);
-    impact.ring(v1, p2.height * 1.8, 0.4);
+    impact.ring(v1, q.height * 1.8, 0.4);
     forward.set(0, 0, 0);
-    sparks.burst(v1, forward, 12, p2.height * 0.07, p2.height * 2.4, 0.25, 0.25);
-    fx.shake(0.4);
+    sparks.burst(v1, forward, 12, q.height * 0.07, q.height * 2.4, 0.25, 0.25);
+    if (n.ctl === dummy) fx.shake(0.4);
   } else if (e.type === 'wallSlam') {
-    dealDamage(DAMAGE.wallSlam);
-    v1.set(e.x, p2.height * 0.5, e.z);
-    impact.flash(v1, p2.height * 2.6, 0.2);
-    impact.ring(p2.group.position, p2.height * 2.0, 0.4);
+    if (n.ctl === dummy) dealDamage(DAMAGE.wallSlam); else damageNpc(n, DAMAGE.wallSlam);
+    v1.set(e.x, q.height * 0.5, e.z);
+    impact.flash(v1, q.height * 2.6, 0.2);
+    impact.ring(q.group.position, q.height * 2.0, 0.4);
     forward.set(0, 0, 0);
-    sparks.burst(v1, forward, 18, p2.height * 0.07, p2.height * 3.0, 0.07, 0.3);
-    hitStop = 0.1;
-    fx.shake(0.9);
+    sparks.burst(v1, forward, 18, q.height * 0.07, q.height * 3.0, 0.07, 0.3);
+    if (n.ctl === dummy) { hitStop = 0.1; fx.shake(0.9); }
   }
 }
 
@@ -801,7 +833,7 @@ function healPlayer(amount) {
 // ---- 必殺技のムービー演出 ----
 let ultDirector;
 const swordUlt = new UltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, groundCracks, p1, p2, player, dummy, ultPath,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, groundCracks, p1, get p2() { return p2; }, player, get dummy() { return dummy; }, ultPath,
   hooks: {
     hitStop: (sec) => { hitStop = Math.max(hitStop, sec); },
     flashFoe: (sec) => { flash = Math.max(flash, sec); },
@@ -823,13 +855,13 @@ const swordUlt = new UltimateDirector({
 ultDirector = swordUlt;
 // バットの必殺技（バッティングセンターのムービー）。剣のものと同じ hooks を使う
 const batUlt = new BatUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, p2, getPlayer: () => player,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
   hooks: swordUlt.ctx.hooks,
 });
 
 // ---- バット用の演出（ボールの飛行・命中など）----
 const batDirector = new BatDirector({
-  scene, camera, impact, sparks, fx, p1, p2, stage, dummy, getPlayer: () => player,
+  scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player,
   hooks: {
     hitStop: (sec) => { hitStop = Math.max(hitStop, sec); },
     flashFoe: (sec) => { flash = Math.max(flash, sec); },
@@ -842,17 +874,17 @@ const batDirector = new BatDirector({
 const batSwarm = new BatSwarm(scene, 340);
 // 吸血牙の必殺技（ドラキュラ城のムービー）
 const fangDirector = new FangDirector({
-  scene, camera, impact, sparks, fx, p1, p2, stage, dummy, getPlayer: () => player, swarm: batSwarm,
+  scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player, swarm: batSwarm,
   hooks: swordUlt.ctx.hooks,
 });
 const fangUlt = new FangUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, p2, getPlayer: () => player,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
   hooks: swordUlt.ctx.hooks, swarm: batSwarm, fang: fangDirector,
 });
 
 // 擬音: 文字の演出（必殺技はムービーなし。KO の後始末だけ、ult の stub が受け持つ）
 const onomDirector = new OnomDirector({
-  scene, camera, impact, sparks, fx, p1, p2, stage, dummy, getPlayer: () => player,
+  scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player,
   hooks: { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) },
 });
 const onomUlt = {
@@ -864,35 +896,372 @@ const onomUlt = {
 // 矢印: ステッカー・砲弾・隆起の演出と、必殺技（ゴミ処理場のムービー）
 const arrowHooks = { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) };
 const arrowDirector = new ArrowDirector({
-  scene, camera, impact, sparks, fx, p1, p2, stage, dummy, getPlayer: () => player, hooks: arrowHooks,
+  scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player, hooks: arrowHooks, foes: npcs.map((n) => n.c),
 });
 const arrowUlt = new ArrowUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, p2, getPlayer: () => player,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
   hooks: swordUlt.ctx.hooks, arrow: arrowDirector,
 });
+
+// ---- モード（練習 / バトル）と、NPC ----
+//   練習モード   : 相手（npcs[0]）は立っているだけ。倒すと、しばらくして復活する
+//   バトルモード : 自分を入れて 2〜4 人。NPC は考えて動き、自分を含めてお互いを攻撃する。最後まで立っていた人の勝ち
+// 自分の技はすべて「今狙っている相手（dummy）」に当たる。バトルモードでは、動きが止まっているときに、いちばん近い相手へ切り替わる。
+let mode = 'practice';
+let matchCfg = { mode: 'practice', players: 2 };
+let matchOver = null;   // null | 'win' | 'lose'
+let matchEndT = 0;      // 勝敗が決まってからの秒数（結果の表示を出したら -1）
+const battleHud = new BattleHud();
+const NPC_DAMAGE = 0.75;      // NPC の通常攻撃は、プレイヤーの同じ攻撃の 75% のダメージ
+const HURTABLE = new Set(['ground', 'crouch', 'air', 'land', 'attack', 'hit']); // 攻撃を受ける状態（技・必殺技・投げの最中は受けない）
+const NPC_BUSY = new Set(['launched', 'held', 'thrown', 'down', 'finisher']);
+const foeAlive = (n) => n.alive && !n.dying && !n.ctl.health.ko;
+
+function resetFighter(k) {
+  const c = k.c;
+  const g = c.group;
+  for (const fn of ['cancelBat', 'cancelFang', 'cancelArrow', 'cancelOnom']) if (typeof k[fn] === 'function') k[fn]();
+  k.state = 'ground';
+  k.vx = k.vy = k.vz = 0;
+  k.timer = 0; k.downTimer = 0;
+  k.fin = null; k.sk = null; k.s2 = null; k.s3 = null; k.s4 = null; k.ult = null;
+  if ('bs' in k) k.bs = null;
+  k.skillCooldown = 0; k.skill2Cooldown = 0; k.skill3Ready = false; k.skill4Ready = false;
+  k.finisherWindow = 0; k.attackActive = false; k.hitDone = false; k.grace = 0;
+  k.health.refill(); k.health.invulnerable = false; k.gauge.reset(); k.status.clear();
+  g.position.y = 0; g.rotation.x = 0; g.rotation.z = 0; g.scale.setScalar(c.scale);
+  c.animator.trailOn = false;
+  c.animator.play(k.idle, 0);
+  c.setFlash(0);
+}
+
+function placeFighters() {
+  const list = [p1, ...activeNpcs.map((n) => n.c)];
+  if (mode === 'practice') {
+    p1.group.position.set(-0.6, 0, 0); p1.group.rotation.y = Math.PI / 2;
+    npcs[0].c.group.position.set(0.6, 0, 0); npcs[0].c.group.rotation.y = -Math.PI / 2;
+    return;
+  }
+  // バトル: 円形に並んで、中央を向く（自分は手前＝カメラ側）
+  const R = 2.6;
+  list.forEach((c, i) => {
+    const a = Math.PI + (i / list.length) * Math.PI * 2;
+    c.group.position.set(Math.cos(a) * R, 0, Math.sin(a) * R);
+    c.group.rotation.y = Math.atan2(-Math.cos(a), -Math.sin(a));
+  });
+}
+
+function refreshRemaining() {
+  const left = 1 + activeNpcs.filter(foeAlive).length;
+  battleHud.setRemaining(left, activeNpcs.length + 1, mode === 'battle');
+}
+
+// 試合を始める（またはやり直す）
+function setupMatch(cfg) {
+  matchCfg = { mode: cfg.mode === 'battle' ? 'battle' : 'practice', players: cfg.players ?? 2 };
+  mode = matchCfg.mode;
+  matchOver = null; matchEndT = 0;
+  ko = null; koPending = false; hitStop = 0; flash = 0; slashes.length = 0;
+  battleHud.hideResult();
+  const count = mode === 'battle' ? Math.min(NPC_LOOKS.length, Math.max(1, matchCfg.players - 1)) : 1;
+  activeNpcs = npcs.slice(0, count);
+  resetFighter(player);
+  for (const n of npcs) {
+    resetFighter(n.ctl);
+    n.alive = activeNpcs.includes(n);
+    n.dying = false; n.deathT = 0; n.flashT = 0; n.burnAcc = 0;
+    n.brain = new NpcBrain(0.45 + 0.15 * n.id);
+    n.c.group.visible = n.alive;
+    n.tag.visible = mode === 'battle' && n.alive;
+  }
+  youTag.visible = mode === 'battle';
+  placeFighters();
+  setFoe(activeNpcs[0]);
+  view.pivot.copy(p1.group.position);
+  view.snapped = false;
+  view.setBehind(p1.group.rotation.y);
+  view.zoom = view.zoomTarget = 1;
+  refreshRemaining();
+}
+
+// 敵の一覧（NPC の頭脳に渡す）。自分（プレイヤー）は、少しだけ狙われやすい
+function enemiesOf(n) {
+  const list = [{ c: p1, ctl: player, alive: () => !player.health.ko && !matchOver, weight: 0.85 }];
+  for (const m of activeNpcs) if (m !== n) list.push({ c: m.c, ctl: m.ctl, alive: () => foeAlive(m), weight: 1 });
+  return list;
+}
+
+// 自分が狙う相手を決める（バトルモード）。動きが止まっているときだけ、いちばん近い人へ。いまの相手が倒れたら、すぐ次へ
+function updateFoeChoice() {
+  if (mode !== 'battle' || matchOver) return;
+  const st = player.state;
+  if (st === 'ult' || ultDirector.active || koPending) return;
+  if (st === 'finisher' || st === 'airSlam' || st === 'skill' || st === 'skill2' || st === 'skill3' || st === 'skill4' || player.bs || player.s2 || player.s3) return;
+  const cur = activeNpcs.find((n) => n.ctl === dummy);
+  const curOk = cur && foeAlive(cur);
+  if (curOk && !(st === 'ground' || st === 'crouch' || st === 'air' || st === 'land' || st === 'hit')) return; // 攻撃の途中では、切り替えない
+  let best = null; let bd = Infinity;
+  for (const n of activeNpcs) {
+    if (!foeAlive(n)) continue;
+    const d = Math.hypot(n.c.group.position.x - p1.group.position.x, n.c.group.position.z - p1.group.position.z) * (n === cur ? 0.7 : 1); // いまの相手を、少し優先する（ころころ変わらない）
+    if (d < bd) { bd = d; best = n; }
+  }
+  if (best && best !== cur) setFoe(best);
+}
+
+// 相手（n）に、プレイヤー以外が与えたダメージ（NPC の攻撃・燃焼・壁への激突）
+function damageNpc(n, amount, at) {
+  const dealt = n.ctl.health.damage(amount);
+  if (dealt <= 0) return 0;
+  const where = at ?? v1.set(n.c.group.position.x, n.c.group.position.y + n.c.height * 0.7, n.c.group.position.z);
+  fightHud.popDamage(where, dealt, dealt >= 45 ? 'big' : '');
+  return dealt;
+}
+
+// ---- NPC の攻撃の当たり判定 ----
+const npcA = new THREE.Vector3();
+const npcB = new THREE.Vector3();
+function npcCheckHit(n) {
+  const k = n.ctl;
+  if (!k.attackActive || k.hitDone || n.dying || matchOver === 'lose') return;
+  const sw = n.c.sword;
+  if (!sw) return;
+  n.c.group.updateWorldMatrix(true, true);
+  npcA.copy(sw.userData.base).applyMatrix4(sw.matrixWorld);
+  npcB.copy(sw.userData.tip).applyMatrix4(sw.matrixWorld);
+  const targets = [{ c: p1, ctl: player, isPlayer: true }];
+  for (const m of activeNpcs) if (m !== n && foeAlive(m)) targets.push({ c: m.c, ctl: m.ctl, n: m });
+  for (const t of targets) {
+    if ((t.ctl.grace ?? 0) > 0) continue;
+    if (t.isPlayer ? !HURTABLE.has(t.ctl.state) : (NPC_BUSY.has(t.ctl.state) || t.ctl.state === 'skill')) continue;
+    const pos = t.c.group.position;
+    if (Math.min(npcA.y, npcB.y) > pos.y + t.c.height * 1.05) continue;
+    if (distToSegmentXZ(pos.x, pos.z, npcA, npcB) >= HIT_RADIUS * t.c.scale) continue;
+    npcLand(n, t);
+    return;
+  }
+}
+function npcLand(n, t) {
+  const k = n.ctl;
+  k.hitDone = true;
+  const atk = k.attacks[k.attackIndex];
+  const dx = t.c.group.position.x - n.c.group.position.x;
+  const dz = t.c.group.position.z - n.c.group.position.z;
+  const len = Math.hypot(dx, dz) || 1;
+  t.ctl.hit(dx, dz, atk.power);
+  t.ctl.grace = (atk.power > 1 ? 0.9 : 0.6) + 0.25; // のけぞっている間と、そのあと少しは、続けて当たらない（ハメ防止）
+  const dmg = DAMAGE.attack[k.attackIndex] * NPC_DAMAGE;
+  const dealt = t.isPlayer ? player.health.damage(dmg) : t.n.ctl.health.damage(dmg);
+  const strong = atk.power > 1;
+  const q = t.c;
+  v1.set(q.group.position.x - (dx / len) * 0.05, q.group.position.y + q.height * 0.6, q.group.position.z - (dz / len) * 0.05);
+  if (dealt > 0) fightHud.popDamage(v1, dealt, strong ? 'big' : '');
+  forward.set(dx / len, 0, dz / len);
+  sparks.burst(v1, forward, strong ? 16 : 9, q.height * (strong ? 0.07 : 0.055), q.height * 3.2);
+  impact.flash(v1, q.height * (strong ? 2.2 : 1.5), strong ? 0.18 : 0.13);
+  if (t.isPlayer) {
+    hitStop = Math.max(hitStop, strong ? 0.1 : 0.05);
+    fx.shake(strong ? 0.7 : 0.35);
+    flashPlayer = 0.09;
+  } else {
+    t.n.flashT = 0.09;
+  }
+}
+let flashPlayer = 0;
+let flashPlayerOn = false;
+
+function updateNpcs(dt, realDt) {
+  const frozen = ultDirector.active; // 必殺技のムービー中は、相手以外の動きを止める
+  player.grace = Math.max(0, (player.grace ?? 0) - dt);
+  flashPlayer = Math.max(0, flashPlayer - realDt);
+  for (const n of activeNpcs) {
+    if (!n.alive) continue;
+    const k = n.ctl;
+    k.grace = Math.max(0, (k.grace ?? 0) - dt);
+    n.flashT = Math.max(0, n.flashT - realDt);
+    if (frozen && k !== dummy) continue;
+    let cmd = NO_INPUT;
+    if (mode === 'battle' && !matchOver && !n.dying) cmd = n.brain.think(n, enemiesOf(n), dt);
+    k.update(dt, cmd);
+    for (const e of k.events) onFoeEvent(n, e);
+    k.events.length = 0;
+    // 燃焼（擬音）: 今狙っていない相手の分は、ここで数える（狙っている相手の分は OnomDirector が数える）
+    if (k !== dummy && k.status.has('burn') && foeAlive(n)) {
+      n.burnAcc += dt;
+      while (n.burnAcc >= 0.5) { n.burnAcc -= 0.5; damageNpc(n, DAMAGE.onomBurnTick); }
+    } else n.burnAcc = 0;
+  }
+}
+
+// 立っている相手は、狙っている人のほうを向く（気絶中は、ふらふらしたまま向き直らない）
+function faceFoes(dt) {
+  for (const n of activeNpcs) {
+    if (!n.alive || n.dying) continue;
+    const k = n.ctl;
+    if (k.state !== 'ground' || k.status.has('stun')) continue;
+    if (ultDirector.active && k !== dummy) continue;
+    const tc = mode === 'battle' ? (n.brain.target?.c ?? p1) : p1;
+    const want = Math.atan2(tc.group.position.x - n.c.group.position.x, tc.group.position.z - n.c.group.position.z);
+    let diff = want - n.c.group.rotation.y;
+    diff -= Math.PI * 2 * Math.round(diff / (Math.PI * 2));
+    n.c.group.rotation.y += diff * (1 - Math.exp(-(mode === 'battle' ? 10 : 6) * dt));
+  }
+}
+
+// キャラ同士はすり抜けない
+function separateFighters() {
+  // 自分は、掴み技などの最中はすり抜ける（今の相手との間だけ）
+  const grappling = ((player.weaponId === 'fang' || player.weaponId === 'arrow' || player.weaponId === 'onom') && player.state.startsWith('bskill')) || player.state === 'finisher' || player.state === 'ult' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
+  const bodies = [{ c: p1, k: player, isP: true }];
+  for (const n of activeNpcs) if (n.alive && !n.dying) bodies.push({ c: n.c, k: n.ctl, n });
+  for (let i = 0; i < bodies.length; i++) {
+    for (let j = i + 1; j < bodies.length; j++) {
+      const a = bodies[i]; const b = bodies[j];
+      const minDist = 0.36 * (a.c.height + b.c.height) / 2;
+      const sx = a.c.group.position.x - b.c.group.position.x;
+      const sz = a.c.group.position.z - b.c.group.position.z;
+      const sep = Math.hypot(sx, sz);
+      if (sep >= minDist || sep <= 1e-6) continue;
+      if (a.c.group.position.y >= b.c.height || b.c.group.position.y >= a.c.height) continue; // 飛び越える
+      if (NPC_BUSY.has(b.k.state) || (!a.isP && NPC_BUSY.has(a.k.state))) continue;
+      if (a.isP && b.n.ctl === dummy && grappling) continue;
+      if (a.isP && player.state === 'ult') continue;
+      const nx = sx / sep; const nz = sz / sep;
+      if (a.isP && mode === 'practice') {
+        // 練習: 相手は動かない。自分を外へ押し出す
+        a.c.group.position.x = b.c.group.position.x + nx * minDist;
+        a.c.group.position.z = b.c.group.position.z + nz * minDist;
+      } else {
+        const push = (minDist - sep) / 2;
+        a.c.group.position.x += nx * push; a.c.group.position.z += nz * push;
+        b.c.group.position.x -= nx * push; b.c.group.position.z -= nz * push;
+      }
+      if (a.isP) {
+        // 相手に向かう分の速度は消す（押し付けたまま走り続けない）
+        const into = player.vx * sx + player.vz * sz;
+        if (into < 0) { player.vx -= (into * sx) / (sep * sep); player.vz -= (into * sz) / (sep * sep); }
+      }
+    }
+  }
+}
+
+// ---- 脱落・勝敗 ----
+function scanDeaths(realDt) {
+  if (mode !== 'battle') return;
+  const ultBusy = player.state === 'ult'; // 必殺技の最中は、終わってから脱落にする
+  for (const n of activeNpcs) {
+    if (!n.alive) continue;
+    if (!n.dying) {
+      if (n.ctl.health.ko && !ultBusy) beginDeath(n);
+    } else {
+      n.deathT += realDt;
+      const st = n.ctl.state;
+      if ((n.deathT > 1.6 && (!NPC_BUSY.has(st) || st === 'down')) || n.deathT > 4) { // 倒れたら、消える
+        n.alive = false;
+        n.c.group.visible = false; n.tag.visible = false;
+        n.ctl.status.clear(); n.c.setFlash(0);
+        refreshRemaining();
+      }
+    }
+  }
+  if (!matchOver) {
+    if (player.health.ko) loseMatch();
+    else if (activeNpcs.every((n) => !n.alive || n.dying)) winMatch();
+  }
+}
+function beginDeath(n) {
+  n.dying = true; n.deathT = 0;
+  n.ctl.health.invulnerable = true;
+  fightHud.showBanner('K.O.!', n.name);
+  hitStop = Math.max(hitStop, 0.3);
+  fx.shake(0.8);
+  fx.zoom(-160);
+  const st = n.ctl.state;
+  if (st === 'ground' || st === 'hit' || st === 'down' || st === 'attack' || st === 'crouch' || st === 'land' || st === 'air' || st === 'airSlam') {
+    n.ctl.launch(n.c.group.position.x - p1.group.position.x, n.c.group.position.z - p1.group.position.z, 60, 16);
+  }
+  n.ctl.status.apply('stun', 9);
+  refreshRemaining();
+}
+function winMatch() {
+  matchOver = 'win'; matchEndT = 0;
+  fightHud.showBanner('YOU WIN!', '最後まで立っていた！');
+}
+function loseMatch() {
+  matchOver = 'lose'; matchEndT = 0;
+  player.health.invulnerable = true;
+  fightHud.showBanner('K.O.!', 'YOU LOSE');
+  hitStop = Math.max(hitStop, 0.35);
+  fx.shake(1);
+  fx.zoom(-200);
+  let from = null; let bd = Infinity;
+  for (const n of activeNpcs) { if (!n.alive) continue; const d = Math.hypot(n.c.group.position.x - p1.group.position.x, n.c.group.position.z - p1.group.position.z); if (d < bd) { bd = d; from = n; } }
+  const st = player.state;
+  if (from && (st === 'ground' || st === 'hit' || st === 'crouch' || st === 'land' || st === 'air' || st === 'attack')) {
+    player.launch(p1.group.position.x - from.c.group.position.x, p1.group.position.z - from.c.group.position.z, 50, 14);
+  }
+}
+// ムービーの最中は、相手以外の人と名前札を隠す（ムービーの舞台に、ほかの人が映り込まないように）
+function syncBattleView() {
+  const cine = ultDirector.active;
+  for (const n of npcs) {
+    n.c.group.visible = n.alive && (!cine || n.ctl === dummy);
+    n.tag.visible = mode === 'battle' && n.alive && !cine;
+  }
+  youTag.visible = mode === 'battle' && !cine;
+}
+// 勝敗が決まったら、少ししてから結果（もう一度 / モード選択へ）を出す
+function updateResult(realDt) {
+  if (!matchOver || matchEndT < 0) return;
+  matchEndT += realDt;
+  if (matchEndT > 2.6) {
+    matchEndT = -1;
+    battleHud.showResult(matchOver === 'win', {
+      retry: () => { setupMatch(matchCfg); fightHud.showBanner('READY', 'FIGHT!'); },
+      menu: () => backToMenu(),
+    });
+  }
+}
 
 // ---- 試合前の武器選択 ----
 // 選んだ武器は game.weapon に入る。今は「剣」だけ（ほかの武器はあとから追加する）
 let started = false;
 let weapon = getWeapon();
-const weaponSelect = new WeaponSelect((id) => {
+let lastWeapon = 'sword';
+let pendingCfg = { mode: 'practice', players: 2 };
+function onWeaponChosen(id) {
   weapon = getWeapon(id);
+  lastWeapon = id;
   // 選んだ武器に切り替える: キャラの持ち物と、操作するコントローラ
   p1.setWeapon(id);
   player = id === 'bat' ? batPlayer : id === 'fang' ? fangPlayer : id === 'arrow' ? arrowPlayer : id === 'onom' ? onomPlayer : swordPlayer;
   ultDirector = id === 'bat' ? batUlt : id === 'fang' ? fangUlt : id === 'arrow' ? arrowUlt : id === 'onom' ? onomUlt : swordUlt;
-  window.game.player = player;
-  window.game.ult = ultDirector;
   touch.setWeapon(id); // ボタンのアイコンを、武器に合わせる
-  if (id === 'bat') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（横殴り→一回転→ボール）　T / G: 必殺技　K / E: スキル1（金属バット弾）→ 使用後はスキル3（ボール連打）　L / Q: スキル2（バット投げ）→ 使用後はスキル4（空中バット）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
-  if (id === 'onom') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（ドン→グラグラ→メラメラ）　3段目を当てたあとの Space: コンボ（ドロドロ）　T / G: 必殺技（ドカン・ズドン・バンバン）　K / E: スキル1（ドカン）→ 使用後はスキル3（グルグル）　L / Q: スキル2（スー）→ 使用後はスキル4（ドキドキ）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
-  if (id === 'arrow') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（加速パンチ→ダッシュ蹴り→押さえつけ連打）　3段目を当てたあとの Space: コンボ（地面を隆起）　T / G: 必殺技（前向き矢印）　K / E: スキル1（砲弾）→ 使用後はスキル3（加速ダッシュ）　L / Q: スキル2（高く飛んで叩きつけ）→ 使用後はスキル4（鈍足矢印）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
-  if (id === 'fang') document.getElementById('hud').textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ　左クリック / J: 攻撃（噛みつき→爪の薙ぎ払い→首に噛みつく）　ジャンプ中に攻撃: かぎ爪×3　T / G: 必殺技（赤い宝石）　K / E: スキル1（赤い斬撃・吸血）→ 使用後はスキル3（分身）　L / Q: スキル2（巨大蝙蝠の突進）→ 使用後はスキル4（足を蝙蝠にして回転）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  const hud = document.getElementById('hud');
+  if (id === 'bat') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（横殴り→一回転→ボール）　T / G: 必殺技　K / E: スキル1（金属バット弾）→ 使用後はスキル3（ボール連打）　L / Q: スキル2（バット投げ）→ 使用後はスキル4（空中バット）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  if (id === 'onom') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（ドン→グラグラ→メラメラ）　3段目を当てたあとの Space: コンボ（ドロドロ）　T / G: 必殺技（ドカン・ズドン・バンバン）　K / E: スキル1（ドカン）→ 使用後はスキル3（グルグル）　L / Q: スキル2（スー）→ 使用後はスキル4（ドキドキ）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  if (id === 'arrow') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（加速パンチ→ダッシュ蹴り→押さえつけ連打）　3段目を当てたあとの Space: コンボ（地面を隆起）　T / G: 必殺技（前向き矢印）　K / E: スキル1（砲弾）→ 使用後はスキル3（加速ダッシュ）　L / Q: スキル2（高く飛んで叩きつけ）→ 使用後はスキル4（鈍足矢印）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  if (id === 'fang') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ　左クリック / J: 攻撃（噛みつき→爪の薙ぎ払い→首に噛みつく）　ジャンプ中に攻撃: かぎ爪×3　T / G: 必殺技（赤い宝石）　K / E: スキル1（赤い斬撃・吸血）→ 使用後はスキル3（分身）　L / Q: スキル2（巨大蝙蝠の突進）→ 使用後はスキル4（足を蝙蝠にして回転）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  setupMatch(pendingCfg); // モードに合わせて、人数・位置・体力を整える
   started = true;
   document.body.classList.remove('pre-match');
   fightHud.showBanner('READY', 'FIGHT!');
   window.game.weapon = weapon;
-}, { hold: true }); // スタート画面とロードのあとに出す
+}
+// 流れ: スタート画面 → ロード → モード選択 → 武器選択 → 試合
+let weaponSelect = null;
+function openWeaponSelect() {
+  weaponSelect = new WeaponSelect(onWeaponChosen, { hold: false, initial: lastWeapon });
+}
+let modeSelect = new ModeSelect((cfg) => { pendingCfg = cfg; openWeaponSelect(); }, { hold: true }); // スタート画面とロードのあとに出す
+// 試合の結果から「モード選択へ」: 試合を止めて、モード選択へ戻る
+function backToMenu() {
+  started = false;
+  document.body.classList.add('pre-match');
+  setupMatch({ mode: 'practice', players: 2 }); // 後ろに映る舞台は、練習の配置
+  battleHud.setRemaining(0, 0, false);
+  modeSelect = new ModeSelect((cfg) => { pendingCfg = cfg; openWeaponSelect(); }, { hold: false });
+}
 // 試合前は、HP・ボタンなどの表示を隠す
 document.body.classList.add('pre-match');
 
@@ -946,14 +1315,14 @@ function finishBoot() {
   booted = true;
   bootEl.classList.add('out');
   setTimeout(() => bootEl.remove(), 600);
-  weaponSelect.show();
+  modeSelect.show();
 }
 // 確認用: ロードを飛ばして、すぐ武器選択（game.start から）
 function skipBoot() {
   if (booted) return;
   booted = true;
   bootEl.remove();
-  weaponSelect.show();
+  modeSelect.show();
 }
 let bootStarted = false;
 async function onBootStart() {
@@ -970,7 +1339,13 @@ bootEl.addEventListener('click', () => { if (!startBtn.disabled) onBootStart(); 
 if (/[?&]skipboot\b/.test(location.search)) skipBoot();
 
 // デバッグ用
-window.game = { start: (id) => { skipBoot(); if (id) weaponSelect.select(id); weaponSelect.confirm(); }, isStarted: () => started, weapon, ult: ultDirector, fightHud, dealDamage, view, touch, stage, characters, player, dummy, camera, controls, scene, fx, createCharacter, follow: true, manual: false };
+window.game = {
+  // 確認用: モード選択・武器選択を飛ばして試合を始める。start('sword') = 練習モード、start('sword', { mode: 'battle', players: 4 }) = バトルモード
+  start: (id, cfg = {}) => { skipBoot(); if (cfg.mode) modeSelect.select(cfg.mode); if (cfg.players) modeSelect.setPlayers(cfg.players); modeSelect.confirm(); if (id) weaponSelect.select(id); weaponSelect.confirm(); },
+  isStarted: () => started, weapon, fightHud, dealDamage, view, touch, stage, characters, npcs, camera, controls, scene, fx, createCharacter, follow: true, manual: false,
+  get player() { return player; }, get ult() { return ultDirector; }, get dummy() { return dummy; }, get mode() { return mode; }, get matchOver() { return matchOver; }, get activeNpcs() { return activeNpcs; },
+  setupMatch, battleHud,
+};
 
 addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -996,8 +1371,10 @@ function step(realDt) {
   if (player.ult) dt *= player.ult.timeScale; // 必殺技の締めのため中は、スローモーション
   stage.update(clock.elapsedTime);
 
-  player.update(dt, readCommand());
-  dummy.update(dt, NO_INPUT);
+  updateFoeChoice();
+  const cmd = readCommand();
+  player.update(dt, matchOver === 'lose' ? NO_INPUT : cmd);
+  updateNpcs(dt, realDt);
   input.endFrame();
   // コンボ技を出せる間、ジャンプボタン（と PC の案内）を切り替える
   const canFinish = player.finisherWindow > 0 && player.canGrab();
@@ -1029,8 +1406,7 @@ function step(realDt) {
 
   for (const e of player.events) onAttackEvent(e);
   player.events.length = 0;
-  for (const e of dummy.events) onDummyEvent(e);
-  dummy.events.length = 0;
+  statusHud.label = mode === 'battle' ? (activeNpcs.find((n) => n.ctl === dummy)?.name ?? 'P2') : 'P2';
   statusHud.update(dummy.status);
   statusHudP1.update(player.status);
   // HP・ゲージの表示と、必殺技ボタン（ゲージがたまると、ジャンプボタンの左に出る）
@@ -1050,34 +1426,21 @@ function step(realDt) {
     }
   }
 
-  // キャラ同士はすり抜けない（P1 を P2 の外へ押し出す）
-  const minDist = 0.36 * (p1.height + p2.height) / 2;
-  const sx = p1.group.position.x - p2.group.position.x;
-  const sz = p1.group.position.z - p2.group.position.z;
-  const sep = Math.hypot(sx, sz);
-  const grappling = ((player.weaponId === 'fang' || player.weaponId === 'arrow' || player.weaponId === 'onom') && player.state.startsWith('bskill')) || player.state === 'finisher' || player.state === 'ult' || player.state === 'skill' || player.state === 'skill4' || dummy.state === 'launched' || dummy.state === 'held' || dummy.state === 'thrown' || dummy.state === 'down';
-  if (!grappling && sep < minDist && sep > 1e-6 && p1.group.position.y < p2.height) {
-    p1.group.position.x = p2.group.position.x + (sx / sep) * minDist;
-    p1.group.position.z = p2.group.position.z + (sz / sep) * minDist;
-    // 相手に向かう分の速度は消す（押し付けたまま走り続けない）
-    const into = (player.vx * sx + player.vz * sz) / sep;
-    if (into < 0) {
-      player.vx -= (into * sx) / sep;
-      player.vz -= (into * sz) / sep;
-    }
-  }
-
-  // P2 は（のけぞっていなければ）P1 の方を向き続ける
-  if (dummy.state === 'ground' && !dummy.status.has('stun')) { // 気絶中はふらふらしたまま、向き直らない
-    const want = Math.atan2(p1.group.position.x - p2.group.position.x, p1.group.position.z - p2.group.position.z);
-    let diff = want - p2.group.rotation.y;
-    diff -= Math.PI * 2 * Math.round(diff / (Math.PI * 2));
-    p2.group.rotation.y += diff * (1 - Math.exp(-6 * dt));
-  }
+  separateFighters();
+  faceFoes(dt);
 
   frameDt = dt;
   p1.update(dt, checkHit); // 姿勢を進めるたびに、その時点の刃の位置で当たり判定
-  p2.update(dt);
+  {
+    const frozen = ultDirector.active;
+    for (const n of activeNpcs) {
+      if (!n.alive || (frozen && n.ctl !== dummy)) continue;
+      n.c.update(dt, mode === 'battle' ? () => npcCheckHit(n) : undefined); // NPC も同じ。刃の位置で当たり判定
+    }
+  }
+  scanDeaths(realDt);
+  updateResult(realDt);
+  syncBattleView();
   sparks.update(dt, camera, p1.height * 1.1);
   guard('batDirector', () => batDirector.update(dt));
   guard('fangDirector', () => fangDirector.update(dt));
@@ -1092,7 +1455,8 @@ function step(realDt) {
   updateSkill3(dt, realDt);
   updateTether(clock.elapsedTime);
   flash = Math.max(0, flash - realDt);
-  p2.setFlash(flash > 0 ? 1 : 0);
+  for (const n of activeNpcs) n.c.setFlash(n.ctl === dummy ? (flash > 0 ? 1 : 0) : (n.flashT > 0 ? 1 : 0));
+  if (flashPlayer > 0 || flashPlayerOn) { flashPlayerOn = flashPlayer > 0; p1.setFlash(flashPlayerOn ? 1 : 0); } // 吸血牙の赤い光（setTint）を消さないよう、光らせた前後だけ呼ぶ
 
   // 追従カメラ。視点を触っていないときだけ、進行方向（攻撃中は狙った方向）の背後へゆっくり回り込む
   if (ultDirector.active) {
