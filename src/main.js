@@ -1364,6 +1364,8 @@ let myReady = false;
 let rematchMine = false;
 let rematchTheirs = false;
 let latestCmd = { x: 0, z: 0, run: false, attack: false, skillHold: false };
+let pingT = 0;
+let pingShown = false;
 const NET_INTERVAL = 1 / 30;   // 位置・状態を送る間隔（秒）
 const r2 = (v) => Math.round(v * 100) / 100;
 const moveLocked = (k) => { const s = k.state; return s === 'ult' || s === 'skill' || s === 'skill2' || s === 'skill3' || s === 'skill4' || s === 'airSlam' || s === 'finisher' || s.startsWith('bskill'); }; // 技の最中は、相手の技を受けない
@@ -1501,7 +1503,9 @@ function netTick(realDt) {
       ultAway = true; ultAwayT = 0;
     }
   }
-  if (mode !== 'online' || !started || !net || !net.open) return;
+  if (mode !== 'online' || !started || !net || !net.open) { if (pingShown) { pingShown = false; battleHud.setPing(null); } return; }
+  pingT -= realDt;
+  if (pingT <= 0) { pingT = 1; pingShown = true; battleHud.setPing(net.rtt); } // 往復の時間（画面の右上に出す）
   replica.flush(realDt);
   netAcc += realDt;
   if (netAcc < NET_INTERVAL) return;

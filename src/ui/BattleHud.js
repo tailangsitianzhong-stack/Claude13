@@ -11,6 +11,11 @@ body.pre-match #battle-hud, body.cine-on #battle-hud { visibility: hidden; }
 #battle-result h2 { margin: 0; font: 900 min(14vw, 64px)/1 system-ui, sans-serif; letter-spacing: 0.12em; -webkit-text-stroke: 5px #1b1b30; paint-order: stroke fill; text-shadow: 0 6px 0 #0a0a1c; }
 #battle-result.win h2 { color: #ffe066; }
 #battle-result.lose h2 { color: #ff8a7d; }
+#net-ping { position: fixed; top: 6px; right: 8px; z-index: 6; display: none; padding: 2px 8px; border-radius: 999px; background: rgba(20,24,40,0.7); color: #cfe6ff; font: 700 11px/1.3 system-ui, sans-serif; letter-spacing: 0.05em; pointer-events: none; }
+#net-ping.on { display: block; }
+#net-ping.slow { color: #ffd27a; }
+#net-ping.bad { color: #ff9a8a; }
+body.pre-match #net-ping, body.cine-on #net-ping { visibility: hidden; }
 #battle-wait { position: fixed; left: 50%; bottom: 18%; transform: translateX(-50%); z-index: 31; display: none; padding: 8px 20px; border-radius: 999px; background: rgba(20,24,40,0.85); color: #fff; font: 800 14px/1.3 system-ui, sans-serif; letter-spacing: 0.08em; pointer-events: none; }
 #battle-wait.on { display: block; }
 #battle-result .sub-msg { font-size: 13px; color: #cfe6ff; letter-spacing: 0.06em; text-align: center; max-width: 80vw; }
@@ -34,6 +39,9 @@ export class BattleHud {
     document.body.appendChild(this.count);
     this.result = document.createElement('div');
     this.result.id = 'battle-result';
+    this.ping = document.createElement('div');
+    this.ping.id = 'net-ping';
+    document.body.appendChild(this.ping);
     this.wait = document.createElement('div');
     this.wait.id = 'battle-wait';
     document.body.appendChild(this.wait);
@@ -64,6 +72,16 @@ export class BattleHud {
     retry.disabled = false;
     retry.textContent = 'もう一度';
     this.result.classList.add('on');
+  }
+
+  // 通信対戦: 往復の時間（ミリ秒）の表示。null で消す
+  setPing(ms) {
+    const on = ms != null;
+    this.ping.classList.toggle('on', on);
+    if (!on) return;
+    this.ping.textContent = '通信 ' + Math.round(ms) + 'ms';
+    this.ping.classList.toggle('slow', ms >= 80 && ms < 200);
+    this.ping.classList.toggle('bad', ms >= 200);
   }
 
   // 「あいてを待っています」などの小さな表示（null で消す）

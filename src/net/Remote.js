@@ -149,6 +149,7 @@ export class Replica {
     this.forceDirty = false;
     this.forceAcc = 0;
     this.predicted = new Map(); // 状態異常 → 予測で付けた時刻（あいての答えが来るまで、消さない）
+    this.hitAt = 0;             // こちらの攻撃が当たった（予測で、のけぞらせた）時刻。答えが来るまでの間は、位置を合わせすぎない
     this.guard = null;          // (m) => bool: この act を受け付けるか
     this.stats = { acts: 0, actErr: 0, resync: 0, snaps: 0, hits: 0, late: 0 };
   }
@@ -226,6 +227,7 @@ export class Replica {
     const raw = this.ctl;
     if (!this.active) return raw.hit(dx, dz, power);
     this.stats.hits++;
+    this.hitAt = performance.now();
     this.send({ k: 'hit', dx: r3(dx), dz: r3(dz), power });
     if (HURTABLE.has(raw.state)) raw.hit(dx, dz, power);        // 予測: すぐ、のけぞらせる（相手の答えは、あとから合わせる）
   }
@@ -233,6 +235,7 @@ export class Replica {
   onLaunch(dx, dz, speed, up) {
     const raw = this.ctl;
     if (!this.active) return raw.launch(dx, dz, speed, up);
+    this.hitAt = performance.now();
     this.send({ k: 'launch', dx: r3(dx), dz: r3(dz), speed, up });
     if (!moveLocked(raw) && !HELD.has(raw.state)) raw.launch(dx, dz, speed, up);
   }
@@ -249,6 +252,7 @@ export class Replica {
     const raw = this.ctl;
     const h = raw.health;
     if (!this.active) return h.damage(n);
+    if (moveLocked(raw)) return 0;   // 相手は技・必殺技の最中（ダメージを受けない）: 数字も、ゲージも、増やさない（相手の端末も、同じように受け付けない）
     const d = Math.min(h.hp, Math.max(0, n));
     if (d <= 0 || h.invulnerable) return 0;
     h.hp -= d;                       // 先に減らして見せる（本当の体力は、相手から届く）
@@ -363,7 +367,9 @@ export class Replica {
     const tx = s.x + s.vx * age;
     const tz = s.z + s.vz * age;
     const err = Math.hypot(tx - g.position.x, tz - g.position.z);
-    const rate = mine === 'move' ? 2.5 : 10;
+    // 予測でのけぞらせた直後は、相手の位置（まだ、のけぞっていない）へ強く引き戻さない（のけぞりが見えなくなるため）
+    const recentHit = performance.now() - this.hitAt < 500;
+    const rate = mine === 'move' ? 2.5 : mine === 'react' && recentHit ? 1.2 : 10;
     const k = err > 3 ? 1 : 1 - Math.exp(-rate * dt);
     g.position.x += (tx - g.position.x) * k;
     g.position.z += (tz - g.position.z) * k;
