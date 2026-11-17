@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CharacterController, FINISHER } from './Controller.js';
+import { CharacterController, FINISHER, ULT_TARGET_STATES } from './Controller.js';
 import { DAMAGE } from './Health.js';
 
 // 矢印のコントローラ。素手に矢印のステッカーを貼って戦う。移動・ジャンプ・被弾などの共通部分は CharacterController を使い、
@@ -568,7 +568,7 @@ export class ArrowController extends CharacterController {
   canUlt() {
     const v = this.victim;
     if (!this.c.sword || !this.gauge.full || !v) return false;
-    if (v.state !== 'ground' && v.state !== 'hit' && v.state !== 'down') return false;
+    if (!ULT_TARGET_STATES.has(v.state)) return false;
     return Math.hypot(v.c.group.position.x - this.c.group.position.x, v.c.group.position.z - this.c.group.position.z) < ULTA.range * this.c.scale;
   }
 

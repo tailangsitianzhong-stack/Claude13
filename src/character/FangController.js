@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CharacterController } from './Controller.js';
+import { CharacterController, ULT_TARGET_STATES } from './Controller.js';
 import { createCharacter } from './Character.js';
 import { createGem } from './Fang.js';
 import { createBigBat, LegBats } from './FangBats.js';
@@ -684,7 +684,7 @@ export class FangController extends CharacterController {
   canUlt() {
     const v = this.victim;
     if (!this.c.sword || !this.gauge.full || !v) return false;
-    if (v.state !== 'ground' && v.state !== 'hit' && v.state !== 'down') return false;
+    if (!ULT_TARGET_STATES.has(v.state)) return false;
     return Math.hypot(v.c.group.position.x - this.c.group.position.x, v.c.group.position.z - this.c.group.position.z) < ULTF.range * this.c.scale;
   }
 

@@ -261,7 +261,7 @@ export class OnomDirector {
     s.position.copy(pos);
     this.ents.push({ kind: 'timed', key: 'zudon', s, p: pos, t: 0, dur: ULTO.zudonFall, width, fall: { from: pos.y, to: p2.height * 0.7 }, onEnd: (e) => {
       const { impact, sparks, fx, hooks } = this.ctx;
-      hooks.groundBreak(p2.group.position.x, p2.group.position.z, 9);
+      if (!this.player.ult || this.player.ult.phase !== 'cine') hooks.groundBreak(p2.group.position.x, p2.group.position.z, 9); // ムービーの舞台には、めくれる地面がない
       impact.flash(e.p, p2.height * 5, 0.35);
       impact.ring(w.set(e.p.x, 0.03, e.p.z), p2.height * 4.4, 0.6);
       impact.ring(w.set(e.p.x, 0.03, e.p.z), p2.height * 2.4, 0.4);

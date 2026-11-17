@@ -15,6 +15,7 @@ import { preloadWords, allWordTextures } from './game/Words.js';
 import { ArrowController, ASKILL1 as ASK1, ASKILL2 as ASK2 } from './character/ArrowController.js';
 import { ArrowDirector } from './game/ArrowDirector.js';
 import { ArrowUltimateDirector } from './cinematic/ArrowUltimate.js';
+import { OnomUltimateDirector } from './cinematic/OnomUltimate.js';
 import { CharacterController, ATTACKS, AIR_SLAM, FINISHER, SKILL1, SKILL2, SKILL3, SKILL4, ultPath } from './character/Controller.js';
 import { FIGHT, DAMAGE } from './character/Health.js';
 import { FightHud } from './ui/FightHud.js';
@@ -241,6 +242,8 @@ function onAttackEvent(e) {
   try { handleAttackEvent(e); } catch (err) { window.game.reportError?.('event ' + e.type, err); }
 }
 function handleAttackEvent(e) {
+  // 通信対戦: 必殺技が当たったとき・終わったとき、相手の画面で「ふたりが消える・また現れる」ように知らせる
+  if (mode === 'online' && net) { if (e.type === 'ultHit') net.send({ k: 'ult', on: true }); else if (e.type === 'ultCineEnd') net.send({ k: 'ult', on: false }); }
   if (player.state !== 'ult' && GAUGE_ON_USE.has(e.type)) player.gauge.add(FIGHT.gaugePerSkill);
   if (EVENT_DAMAGE[e.type]) dealDamage(EVENT_DAMAGE[e.type]);
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
@@ -889,16 +892,15 @@ const fangUlt = new FangUltimateDirector({
   hooks: swordUlt.ctx.hooks, swarm: batSwarm, fang: fangDirector,
 });
 
-// 擬音: 文字の演出（必殺技はムービーなし。KO の後始末だけ、ult の stub が受け持つ）
+// 擬音: 文字の演出と、必殺技（「擬音の世界」のムービー）
 const onomDirector = new OnomDirector({
   scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player,
   hooks: { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) },
 });
-const onomUlt = {
-  active: false, camDistance: 4,
-  update() {}, updateCamera() {},
-  onEvent(e) { if (e.type === 'ultCineEnd') swordUlt.ctx.hooks.resetCamera(); }, // 必殺技の最中に KO が決まっていたら、ここで KO
-};
+const onomUlt = new OnomUltimateDirector({
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
+  hooks: swordUlt.ctx.hooks,
+});
 
 // 矢印: ステッカー・砲弾・隆起の演出と、必殺技（ゴミ処理場のムービー）
 const arrowHooks = { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) };
@@ -993,7 +995,7 @@ function setupMatch(cfg) {
   placeFighters();
   setFoe(activeNpcs[0]);
   if (mode === 'online' && net) { puppet.start(net); puppet.placed = false; if (remoteReady) npcs[0].c.setWeapon(remoteReady.w); } else puppet.stop();
-  remoteKo = false; netAcc = 0;
+  remoteKo = false; netAcc = 0; ultAway = false;
   view.pivot.copy(p1.group.position);
   view.snapped = false;
   view.setBehind(p1.group.rotation.y);
@@ -1242,6 +1244,12 @@ function syncBattleView() {
     n.tag.visible = mode !== 'practice' && n.alive && !cine;
   }
   youTag.visible = mode !== 'practice' && !cine;
+  // 通信対戦で、相手の必殺技が当たっている間: ふたりとも消える（終わると、また現れる）
+  const away = mode === 'online' && ultAway;
+  if (away) {
+    p1.group.visible = false;
+    npcs[0].c.group.visible = false; npcs[0].tag.visible = false; youTag.visible = false;
+  } else p1.group.visible = true;
 }
 // 勝敗が決まったら、少ししてから結果（もう一度 / モード選択へ）を出す
 function updateResult(realDt) {
@@ -1259,6 +1267,8 @@ function updateResult(realDt) {
 
 // ---- ローカル通信対戦（1対1）----
 // 流れ: モード選択 → つなぐ（部屋をつくる / 入る）→ 武器選択 → おたがいの準備ができたら試合。仕組みは src/net/Remote.js の説明を参照。
+let ultAway = false;   // 通信対戦: 相手の必殺技が当たっている間（自分も相手も、闘技場から消えている）
+let ultAwayT = 0;
 let myReady = false;
 let rematchMine = false;
 let rematchTheirs = false;
@@ -1299,6 +1309,19 @@ function attachNet(n) {
     if (!forcing && !wasForced && moveLocked(player)) return;
     if (forcing && !wasForced) cancelMoves(player);
     applyForce(player, p1, m);
+  });
+  n.on('ult', (m) => {
+    // 相手の必殺技が当たった（または終わった）。当たっている間は、自分も相手も、闘技場から消える
+    if (mode !== 'online' || !started) return;
+    if (m.on) {
+      if (player.state === 'ult') return; // 自分も必殺技の最中なら、そのまま
+      cancelMoves(player);
+      player.state = 'held'; player.vx = player.vz = player.vy = 0;
+      ultAway = true; ultAwayT = 0;
+    } else {
+      ultAway = false;
+      if (player.state === 'held') player.state = 'ground'; // 相手の最後の知らせが届かなかったときの保険
+    }
   });
   n.on('hit', onRemoteHit);
   n.on('launch', (m) => { if (mode === 'online' && started && !moveLocked(player)) { cancelMoves(player); player.launch(m.dx, m.dz, m.speed, m.up); } });
@@ -1351,7 +1374,7 @@ function notice(text) {
 function leaveOnline(msg) {
   if (net) { net.onClose = () => {}; net.close(); net = null; }
   puppet.stop();
-  myReady = false; remoteReady = null; rematchMine = rematchTheirs = false; remoteKo = false;
+  myReady = false; remoteReady = null; rematchMine = rematchTheirs = false; remoteKo = false; ultAway = false;
   if (weaponSelect && !weaponSelect.done) weaponSelect.dispose();
   battleHud.hideResult();
   battleHud.setWait(null);
@@ -1363,7 +1386,7 @@ function onlineClosed(reason) {
   if (started && mode === 'online') {
     // 試合の途中・結果の表示中に切れた: 続けられないので、「モード選択へ」だけ出す
     puppet.stop();
-    net = null;
+    net = null; ultAway = false; p1.group.visible = true;
     matchOver = matchOver ?? 'win'; matchEndT = -1;
     battleHud.showResult(false, { menu: () => leaveOnline() }, { title: '通信が切れました', message: reason, retry: false });
   } else {
@@ -1372,6 +1395,7 @@ function onlineClosed(reason) {
 }
 // 自分のキャラの様子を、0.05 秒ごとに相手へ送る
 function netTick(realDt) {
+  if (ultAway) { ultAwayT += realDt; if (ultAwayT > 25) { ultAway = false; if (player.state === 'held') player.state = 'ground'; } } // 知らせが届かないときの保険
   if (mode !== 'online' || !started || !net || !net.open) return;
   netAcc += realDt;
   if (netAcc < 0.05) return;
@@ -1456,7 +1480,7 @@ function setLoad(p, msg) {
 }
 // root の舞台（null = 試合のステージ）を表示した状態で、すべてのものを（画面の外のものも）一度描く
 function warmRender(root) {
-  const cine = [batUlt.center.group, fangUlt.castle.group, arrowUlt.yard.group];
+  const cine = [batUlt.center.group, fangUlt.castle.group, arrowUlt.yard.group, onomUlt.world.group];
   const saved = [];
   // 光源は、そのまま（光源の数が変わると、シェーダーが別物になる。試合中と同じ数で作る）
   scene.traverse((o) => { saved.push([o, o.visible, o.frustumCulled]); if (!o.isLight) o.visible = true; o.frustumCulled = false; });
@@ -1474,7 +1498,7 @@ async function loadAll() {
   for (const t of allWordTextures()) renderer.initTexture(t);   // 画像を、先に GPU へ送っておく（初めて出るときに、止まらない）
   setLoad(0.18, 'エフェクトを準備しています');
   await nextFrame();
-  const places = [['試合のステージ', null], ['バッティングセンター', batUlt.center.group], ['ドラキュラ城', fangUlt.castle.group], ['ゴミ処理場', arrowUlt.yard.group]];
+  const places = [['試合のステージ', null], ['バッティングセンター', batUlt.center.group], ['ドラキュラ城', fangUlt.castle.group], ['ゴミ処理場', arrowUlt.yard.group], ['擬音の世界', onomUlt.world.group]];
   for (let i = 0; i < places.length; i++) {
     setLoad(0.25 + (0.7 * i) / places.length, places[i][0] + 'を読み込んでいます');
     await nextFrame();
@@ -1519,7 +1543,7 @@ window.game = {
   start: (id, cfg = {}) => { skipBoot(); if (cfg.mode) modeSelect.select(cfg.mode); if (cfg.players) modeSelect.setPlayers(cfg.players); modeSelect.confirm(); if (id) weaponSelect.select(id); weaponSelect.confirm(); },
   isStarted: () => started, weapon, fightHud, dealDamage, view, touch, stage, characters, npcs, camera, controls, scene, fx, createCharacter, follow: true, manual: false,
   get player() { return player; }, get ult() { return ultDirector; }, get dummy() { return dummy; }, get mode() { return mode; }, get matchOver() { return matchOver; }, get activeNpcs() { return activeNpcs; },
-  get net() { return net; }, puppet, setupMatch, battleHud,
+  get net() { return net; }, get ultAway() { return ultAway; }, puppet, setupMatch, battleHud,
 };
 
 addEventListener('resize', () => {

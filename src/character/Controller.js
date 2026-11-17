@@ -33,6 +33,8 @@ export const ATTACKS = [
   { anim: 'attack2', duration: 0.44, active: [0.34, 0.64], chain: 0.72, lunge: [0.26, 0.5, 10], power: 1 },
   { anim: 'attack3', duration: 0.68, active: [0.5, 0.71], chain: 0.86, lunge: [0.24, 0.58, 14], power: 2 },
 ];
+// 必殺技を当てられる相手の状態。立っているときだけでなく、攻撃・ジャンプの最中でも、必殺技は当たる（通信対戦・NPC は、動き回っているため）
+export const ULT_TARGET_STATES = new Set(['ground', 'hit', 'down', 'attack', 'crouch', 'air', 'land']);
 export const IDEAL_RANGE = 4.9; // 踏み込みで詰める間合い（リグ単位）。これより近づかない
 // 空中攻撃（叩きつけ）。ジャンプ中に攻撃を押すと、前方斜め下へ一瞬で突っ込み、着地点のまわりを攻撃する
 export const AIR_SLAM = {
@@ -529,7 +531,7 @@ export class CharacterController {
   canUlt() {
     const v = this.victim;
     if (!this.c.sword || !this.gauge.full || !v) return false;
-    if (v.state !== 'ground' && v.state !== 'hit' && v.state !== 'down') return false;
+    if (!ULT_TARGET_STATES.has(v.state)) return false;
     const dx = v.c.group.position.x - this.c.group.position.x;
     const dz = v.c.group.position.z - this.c.group.position.z;
     return Math.hypot(dx, dz) < ULT.range * this.c.scale;

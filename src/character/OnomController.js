@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CharacterController, FINISHER } from './Controller.js';
+import { CharacterController, FINISHER, ULT_TARGET_STATES } from './Controller.js';
 
 // 擬音のコントローラ。大声で擬音を言うと、その文字が飛び出す。移動・ジャンプ・被弾などの共通部分は CharacterController を使い、
 // 通常攻撃・スキル・コンボ・必殺技を差し替える。ジャンプ中の攻撃はない。
@@ -27,16 +27,22 @@ export const OSKILL3 = { duration: 0.7, fireAt: 0.35 };
 export const OSKILL4 = { duration: 0.7, fireAt: 0.35, power: 5 };               // 攻撃力アップの長さ（秒）
 export const OCOMBO = { range: 100, duration: 0.75, fireAt: 0.375 };
 
-// 必殺技の予定表（draw のあとの秒数）: ドカン×3 → ズドン → バンバン×10 → 最後のバンバン
+// 必殺技: 大声を出す（draw）→ 命中（相手がふらふらになる）→ 画面が切り替わって「擬音の世界」のムービー。
+// ムービーの予定表（ムービー開始からの秒数）: 導入 → ドカン×3 → ズドン → バンバン×10 → 最後のバンバン → 余韻
 export const ULTO = {
   range: 220,
   draw: 0.75,
-  dokan: [0.2, 0.65, 1.1],
+  freeze: 0.34,         // 命中して、画面が切り替わるまでの間
+  intro: 1.5,           // ムービーの導入（擬音の世界を見せる）
+  dokan: [0.2, 0.65, 1.1],   // 以下は、導入のあとからの秒数
   zudon: 1.7, zudonFall: 0.4,
   banFrom: 2.75, banGap: 0.11, bans: 10,
   final: 4.1,
-  end: 4.9,
+  tail: 1.7,            // 最後の一撃のあとの余韻
+  player: { x: -3.0, z: 0 },   // ムービーの舞台での位置
+  foe: { x: 1.6, z: 0 },
 };
+export const ULTO_END = ULTO.intro + ULTO.final + ULTO.tail;
 
 const angleDiff = (a, b) => { const d = a - b; return d - Math.PI * 2 * Math.round(d / (Math.PI * 2)); };
 
@@ -165,7 +171,7 @@ export class OnomController extends CharacterController {
   canUlt() {
     const v = this.victim;
     if (!this.c.sword || !this.gauge.full || !v) return false;
-    if (v.state !== 'ground' && v.state !== 'hit' && v.state !== 'down') return false;
+    if (!ULT_TARGET_STATES.has(v.state)) return false;
     return Math.hypot(v.c.group.position.x - this.c.group.position.x, v.c.group.position.z - this.c.group.position.z) < ULTO.range * this.c.scale;
   }
 
@@ -173,7 +179,7 @@ export class OnomController extends CharacterController {
     const { animator } = this.c;
     this.gauge.reset();
     this.cancelOnom();
-    this.ult = { t: 0, timeScale: 1, fired: {}, held: false, saved: null };
+    this.ult = { phase: 'draw', t: 0, timeScale: 1, fired: {}, saved: null };
     this.state = 'ult';
     this.vx = this.vz = this.vy = 0;
     this.attackActive = false;
@@ -191,43 +197,92 @@ export class OnomController extends CharacterController {
     const K = ULTO;
     u.t += dt;
     const vg = v.c.group;
-    group.rotation.y += angleDiff(Math.atan2(vg.position.x - group.position.x, vg.position.z - group.position.z), group.rotation.y) * (1 - Math.exp(-14 * dt));
-    const fire = (name, at, extra = {}) => { if (u.t >= at && !u.fired[name]) { u.fired[name] = true; this.events.push({ type: name, ...extra }); return true; } return false; };
-    if (u.t < K.draw) {
+    if (u.phase === 'draw') {
+      group.rotation.y += angleDiff(Math.atan2(vg.position.x - group.position.x, vg.position.z - group.position.z), group.rotation.y) * (1 - Math.exp(-14 * dt));
       animator.attackT = Math.min(1, u.t / K.draw) * 0.75;
-      return;
+      if (u.t >= K.draw) {
+        // 命中: 相手は、その場でふらふらになる
+        u.phase = 'freeze'; u.t = 0;
+        v.state = 'held';
+        v.vx = v.vz = v.vy = 0;
+        v.attackActive = false;
+        v.status.apply('stun', 30);
+        v.c.animator.play('stunned', 0.05);
+        this.events.push({ type: 'ultHit' });
+      }
+    } else if (u.phase === 'freeze') {
+      animator.attackT = 0.55 + 0.12 * Math.abs(Math.sin(u.t * 14));
+      if (u.t >= K.freeze) this.startUltCine();
+    } else if (u.phase === 'cine') {
+      this.updateUltCine(dt);
     }
-    const T = u.t - K.draw;
-    if (!u.held) {   // 相手は、その場で、攻撃を受け続ける
-      u.held = true;
-      v.state = 'held';
-      v.vx = v.vz = v.vy = 0;
-      v.attackActive = false;
-      v.c.animator.play('stunned', 0.1);
-      this.events.push({ type: 'onomUltBegin' });
+  }
+
+  // 画面が切り替わる: 自分と相手を、ムービーの舞台へ移す（元の位置は覚えておく）
+  startUltCine() {
+    const { group, animator } = this.c;
+    const u = this.ult;
+    const v = this.victim;
+    const vg = v.c.group;
+    const K = ULTO;
+    u.saved = { px: group.position.x, pz: group.position.z, py: group.position.y, yaw: group.rotation.y, ex: vg.position.x, ez: vg.position.z, eyaw: vg.rotation.y };
+    u.phase = 'cine';
+    u.t = 0;
+    group.position.set(K.player.x, 0, K.player.z);
+    group.rotation.set(0, Math.PI / 2, 0);
+    vg.position.set(K.foe.x, 0, K.foe.z);
+    vg.rotation.set(0, -Math.PI / 2, 0);
+    animator.play('fight', 0.01);
+    v.status.remove('stun');
+    v.c.animator.play('stunned', 0.01);
+    this.events.push({ type: 'ultCineStart' });
+  }
+
+  updateUltCine(dt) {
+    const { animator } = this.c;
+    const u = this.ult;
+    const K = ULTO;
+    const T = u.t;
+    const fire = (name, at, extra = {}) => { if (T >= K.intro + at && !u.fired[name]) { u.fired[name] = true; this.events.push({ type: name, ...extra }); return true; } return false; };
+    if (T < K.intro) {
+      // 導入: 構えて、深く息を吸う
+      if (!u.fired.title) { u.fired.title = true; this.events.push({ type: 'ultTitle' }); }
+      animator.attackT = 0;
+    } else {
+      if (!u.fired.shout) { u.fired.shout = true; animator.play('onomShout', 0.1); }
+      animator.attackT = 0.55 + 0.12 * Math.abs(Math.sin((T - K.intro) * 14));
     }
-    animator.attackT = 0.55 + 0.12 * Math.abs(Math.sin(T * 14));
     K.dokan.forEach((at, k) => fire('onomUltDokan' + k, at, { k }));
     fire('onomUltZudon', K.zudon);
     for (let i = 0; i < K.bans; i++) fire('onomUltBan' + i, K.banFrom + i * K.banGap, { i });
     fire('onomUltFinal', K.final);
-    if (T >= K.end) this.endUlt();
+    // 最後の一撃のあたりは、スローモーション
+    u.timeScale = T > K.intro + K.final - 0.25 && T < K.intro + K.final + 0.5 ? 0.3 : 1;
+    if (T >= ULTO_END) this.endUlt();
   }
 
   endUlt() {
-    const { animator } = this.c;
+    const { group, animator, scale: S } = this.c;
+    const u = this.ult;
     const v = this.victim;
-    v.status.remove('stun');
-    if (v.state === 'held') {
-      v.state = 'ground';
-      v.c.group.position.y = 0;
-      const dx = v.c.group.position.x - this.c.group.position.x, dz = v.c.group.position.z - this.c.group.position.z;
-      v.hit(dx, dz, 2);
-    }
-    animator.play('fight', 0.2);
+    const vg = v.c.group;
+    const sv = u.saved ?? { px: group.position.x, pz: group.position.z, yaw: group.rotation.y, ex: vg.position.x, ez: vg.position.z, eyaw: vg.rotation.y };
+    group.position.set(sv.px, 0, sv.pz);
+    group.rotation.set(0, sv.yaw, 0);
+    animator.play('fight', 0.01);
     this.state = 'ground';
     this.vx = this.vz = 0;
+    v.status.remove('stun');
+    // 相手は倒れた姿勢のまま、元の位置へ。しばらくして起き上がる
+    vg.scale.set(S, S, S);
+    vg.position.set(sv.ex, 0, sv.ez);
+    vg.rotation.set(-Math.PI / 2, sv.eyaw, 0);
+    v.state = 'down';
+    v.downTimer = 1.5;
+    v.vx = v.vz = v.vy = 0;
+    v.c.animator.play('down', 0.01);
+    v.c.animator.jolt = 0;
     this.ult = null;
-    this.events.push({ type: 'ultCineEnd' });   // KO が、必殺技の最中に決まっていたら、ここで KO にする
+    this.events.push({ type: 'ultCineEnd', saved: sv });
   }
 }
