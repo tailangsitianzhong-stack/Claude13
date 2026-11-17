@@ -27,7 +27,7 @@ import { ModeSelect } from './ui/ModeSelect.js';
 import { BattleHud } from './ui/BattleHud.js';
 import { NPC_LOOKS, NpcBrain, createNameTag } from './game/Npc.js';
 import { Lobby } from './ui/Lobby.js';
-import { Puppet, takeSnapshot, applyForce } from './net/Remote.js';
+import { Replica, takeState, takeSnapshot, applyForce, installRelay, abortUlt } from './net/Remote.js';
 import { getWeapon } from './game/weapons.js';
 import { CineOverlay } from './cinematic/CineOverlay.js';
 import { UltimateDirector } from './cinematic/UltimateDirector.js';
@@ -70,10 +70,13 @@ const stage = createStage();
 scene.add(stage.group);
 
 // プレイヤーと、相手（NPC）を向かい合わせに配置
-const p1 = createCharacter({ name: 'P1', shirt: 0x1e88e5, pants: 0x2e3a4b, hair: 0x4a2c17, hairStyle: 'short', face: 'smile', sleeves: 'short' });
+let p1 = createCharacter({ name: 'P1', shirt: 0x1e88e5, pants: 0x2e3a4b, hair: 0x4a2c17, hairStyle: 'short', face: 'smile', sleeves: 'short' });
 p1.group.position.set(-0.6, 0, 0);
 p1.group.rotation.y = Math.PI / 2;
 scene.add(p1.group);
+const meChar = p1; // 自分のキャラ（相手の技の再現のとき、p1 が一時的に相手のキャラになるので、自分は meChar で指す）
+let mirror = null;      // 通信対戦: 相手の技を、こちらの画面で再現するための一式（buildMirror が作る）
+let mirrorMode = false; // 相手の技の再現（ミラー）を実行している間 true: ダメージ・画面の揺れ・ヒットストップは、こちらには入れない
 
 // 相手（NPC）は最大3人。練習モードでは [0] だけが立っている（サンドバッグ）。バトルモードでは、人数に応じて 1〜3 人が戦う。
 // 最初に全員を作っておく（試合中に作ると重くなるため。ロードのシェーダー準備にも含まれる）
@@ -94,12 +97,11 @@ for (let i = 0; i < NPC_LOOKS.length; i++) {
   c.group.add(tag);
   scene.add(c.group);
   c.group.visible = i === 0;
-  npcs.push({ id: i, name: look.name, c, ctl, tag, brain: new NpcBrain(0.45 + 0.15 * i), alive: i === 0, dying: false, deathT: 0, flashT: 0, burnAcc: 0 });
+  npcs.push({ id: i, name: look.name, c, ctl, plain: ctl, raw: ctl, tag, brain: new NpcBrain(0.45 + 0.15 * i), alive: i === 0, dying: false, deathT: 0, flashT: 0, burnAcc: 0 });
 }
 const youTag = createNameTag('YOU', '#7fd0ff');
 { const h = p1.height / p1.scale; youTag.scale.set(h * 0.65, h * 0.1625, 1); youTag.position.set(0, h + 0.9, 0); p1.group.add(youTag); }
 // 通信対戦の相手（npcs[0] を、相手の端末のキャラとして動かす）。通信対戦モードのときだけ有効
-const puppet = new Puppet(npcs[0]);
 let net = null;
 const origTagMap = npcs[0].tag.material.map;
 const rivalTagMap = createNameTag('RIVAL', '#ff8a7d').material.map;
@@ -120,6 +122,19 @@ const arrowPlayer = new ArrowController(p1, { bounds: stage.bounds }); // 矢印
 const onomPlayer = new OnomController(p1, { bounds: stage.bounds });   // 擬音を選んだときに使う
 const sawPlayer = new ChainsawController(p1, { bounds: stage.bounds }); // チェンソーを選んだときに使う
 const allPlayers = [swordPlayer, batPlayer, fangPlayer, arrowPlayer, onomPlayer, sawPlayer];
+// 通信対戦: 自分が技を始めたら、相手へ知らせる（相手のレプリカが、同じ技を始める）
+const relay = { on: false, depth: 0, send: (m) => { if (net) net.send(m); } };
+for (const pl of allPlayers) installRelay(pl, relay);
+// 通信対戦の相手: 相手と同じ武器の、本物のコントローラを、こちらの端末でも動かす（相手の技の動き・演出を、こちらの画面で再現する）
+const replica = new Replica({
+  npc: npcs[0],
+  makeCtl: (id, c) => {
+    const o = { bounds: stage.bounds };
+    return id === 'bat' ? new BatController(c, o) : id === 'fang' ? new FangController(c, o) : id === 'arrow' ? new ArrowController(c, o)
+      : id === 'onom' ? new OnomController(c, o) : id === 'saw' ? new ChainsawController(c, o) : new CharacterController(c, o);
+  },
+  onError: (label, err) => window.game.reportError?.(label, err),
+});
 // 狙う相手・コンボ技で掴む相手を、今の相手にする
 function setFoe(n) {
   p2 = n.c; dummy = n.ctl;
@@ -133,7 +148,10 @@ const NO_INPUT = { x: 0, z: 0, run: false, jump: false, attack: false, skill: fa
 // 三人称の追従カメラ。最初は P1 の真後ろから
 const view = new ThirdPersonCamera(camera, renderer.domElement, { bounds: stage.cameraBounds });
 view.setBehind(p1.group.rotation.y);
-const fx = new CameraFx(camera, () => (ultDirector.active ? ultDirector.camDistance : view.currentDistance));
+let fx = new CameraFx(camera, () => (mirror && mirror.cineOn ? mirror.ult.camDistance : ultDirector.active ? ultDirector.camDistance : view.currentDistance));
+const realFx = fx;
+// 相手の技の再現（ミラー）のとき、こちらのカメラを揺らさないための、何もしない fx
+const noopFx = { trauma: 0, baseFov: 55, shake() {}, zoom() {}, kick() {}, roll() {}, update() {}, apply() {}, restore() {} };
 // 確認用: game.follow = false にすると追従を止め、camera.position と controls.target で自由に置ける
 const controls = { target: new THREE.Vector3() };
 const sparks = new Sparks(scene);
@@ -201,7 +219,7 @@ function toCameraSpace(character, [x, y, z]) {
 // ---- ダメージ・ゲージ・KO ----
 // 技を当てたときは必ずここを通す。HP を減らし、ゲージを溜め、数字を出す
 function dealDamage(amount, at, kind) {
-  if (amount <= 0) return 0;
+  if (amount <= 0 || mirrorMode) return 0; // 相手の技の再現（ミラー）では、ダメージは入れない（本当のダメージは、相手の端末から届く）
   if (player.status.has('power')) amount *= 1.5; // 攻撃力アップ（擬音のドキドキ）: ダメージ +50%
   const dealt = dummy.health.damage(amount);
   if (dealt <= 0) return 0;
@@ -247,7 +265,7 @@ function onAttackEvent(e) {
 }
 function handleAttackEvent(e) {
   // 通信対戦: 必殺技が当たったとき・終わったとき、相手の画面で「ふたりが消える・また現れる」ように知らせる
-  if (mode === 'online' && net) { if (e.type === 'ultHit') net.send({ k: 'ult', on: true }); else if (e.type === 'ultCineEnd') net.send({ k: 'ult', on: false }); }
+  if (mode === 'online' && net && !mirrorMode) { if (e.type === 'ultHit') net.send({ k: 'ult', on: true }); else if (e.type === 'ultCineEnd') net.send({ k: 'ult', on: false }); }
   if (player.state !== 'ult' && GAUGE_ON_USE.has(e.type)) player.gauge.add(FIGHT.gaugePerSkill);
   if (EVENT_DAMAGE[e.type]) dealDamage(EVENT_DAMAGE[e.type]);
   const d = toCameraSpace(p1, SLASH_DIR[e.index ?? 2]);
@@ -469,7 +487,7 @@ function onFoeEvent(n, e) {
 }
 
 // ---- スキル3: 飛ぶ斬撃 ----
-const slashes = []; // 飛んでいる斬撃 { x, z, dx, dz, left（残り距離）, radius, power, strong }
+let slashes = []; // 飛んでいる斬撃 { x, z, dx, dz, left（残り距離）, radius, power, strong }
 
 function onSkill3Event(e) {
   if (e.type === 'skill3Start') {
@@ -851,6 +869,7 @@ function checkHit() {
 
 // 自分の体力を回復する（吸血牙）。回復した量を、自分の頭の上に緑の数字で出す
 function healPlayer(amount) {
+  if (mirrorMode) return 0;
   const healed = player.health.heal(amount);
   if (healed > 0) fightHud.popDamage(v1.set(p1.group.position.x, p1.group.position.y + p1.height * 1.15, p1.group.position.z), healed, 'heal');
   return healed;
@@ -859,7 +878,7 @@ function healPlayer(amount) {
 // ---- 必殺技のムービー演出 ----
 let ultDirector;
 const swordUlt = new UltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, groundCracks, p1, get p2() { return p2; }, player, get dummy() { return dummy; }, ultPath,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, groundCracks, get p1() { return p1; }, get p2() { return p2; }, get player() { return player; }, get dummy() { return dummy; }, ultPath,
   hooks: {
     hitStop: (sec) => { hitStop = Math.max(hitStop, sec); },
     flashFoe: (sec) => { flash = Math.max(flash, sec); },
@@ -868,12 +887,12 @@ const swordUlt = new UltimateDirector({
     heal: (amount) => healPlayer(amount),
     // ムービーが終わったら、カメラを自分の背後へ戻す
     resetCamera: () => {
-      view.pivot.copy(p1.group.position);
+      view.pivot.copy(meChar.group.position); // 相手の必殺技の再現（ミラー）のときも、自分（meChar）の背後へ戻す
       view.snapped = false;
-      view.setBehind(p1.group.rotation.y);
+      view.setBehind(meChar.group.rotation.y);
       view.zoom = view.zoomTarget = 1;
       view.followRate = 11;
-      if (koPending) startKO();
+      if (!mirrorMode && koPending) startKO();
     },
   },
 });
@@ -881,12 +900,12 @@ const swordUlt = new UltimateDirector({
 ultDirector = swordUlt;
 // バットの必殺技（バッティングセンターのムービー）。剣のものと同じ hooks を使う
 const batUlt = new BatUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, get p1() { return p1; }, get p2() { return p2; }, getPlayer: () => player,
   hooks: swordUlt.ctx.hooks,
 });
 
 // ---- バット用の演出（ボールの飛行・命中など）----
-const batDirector = new BatDirector({
+let batDirector = new BatDirector({
   scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player,
   hooks: {
     hitStop: (sec) => { hitStop = Math.max(hitStop, sec); },
@@ -899,42 +918,42 @@ const batDirector = new BatDirector({
 // 蝙蝠の群れ（吸血牙のスキル・必殺技で共通）
 const batSwarm = new BatSwarm(scene, 340);
 // 吸血牙の必殺技（ドラキュラ城のムービー）
-const fangDirector = new FangDirector({
+let fangDirector = new FangDirector({
   scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player, swarm: batSwarm,
   hooks: swordUlt.ctx.hooks,
 });
 const fangUlt = new FangUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
-  hooks: swordUlt.ctx.hooks, swarm: batSwarm, fang: fangDirector,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, get p1() { return p1; }, get p2() { return p2; }, getPlayer: () => player,
+  hooks: swordUlt.ctx.hooks, swarm: batSwarm, get fang() { return fangDirector; },
 });
 
 // 擬音: 文字の演出と、必殺技（「擬音の世界」のムービー）
-const onomDirector = new OnomDirector({
+let onomDirector = new OnomDirector({
   scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player,
   hooks: { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) },
 });
 const onomUlt = new OnomUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, get p1() { return p1; }, get p2() { return p2; }, getPlayer: () => player,
   hooks: swordUlt.ctx.hooks,
 });
 
 // 矢印: ステッカー・砲弾・隆起の演出と、必殺技（ゴミ処理場のムービー）
 const arrowHooks = { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) };
-const arrowDirector = new ArrowDirector({
+let arrowDirector = new ArrowDirector({
   scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player, hooks: arrowHooks, foes: npcs.map((n) => n.c),
 });
 const arrowUlt = new ArrowUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
-  hooks: swordUlt.ctx.hooks, arrow: arrowDirector,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, get p1() { return p1; }, get p2() { return p2; }, getPlayer: () => player,
+  hooks: swordUlt.ctx.hooks, get arrow() { return arrowDirector; },
 });
 
 // チェンソー: 通常攻撃の血しぶき・首刺し・ナイフ・振り下ろし・飛び蹴り・連続斬り・出血と、必殺技（闇夜の森のムービー）
-const sawDirector = new ChainsawDirector({
+let sawDirector = new ChainsawDirector({
   scene, camera, impact, sparks, fx, p1, get p2() { return p2; }, stage, get dummy() { return dummy; }, getPlayer: () => player, groundCracks,
   hooks: { ...swordUlt.ctx.hooks, groundBreak: (x, z, r) => groundBreak.trigger(x, z, r) },
 });
 const sawUlt = new ChainsawUltimateDirector({
-  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, p1, get p2() { return p2; }, getPlayer: () => player,
+  scene, camera, lights: { hemi, sun }, stage, impact, sparks, fx, overlay: cineOverlay, get p1() { return p1; }, get p2() { return p2; }, getPlayer: () => player,
   hooks: swordUlt.ctx.hooks,
 });
 
@@ -1001,15 +1020,26 @@ function refreshRemaining() {
 function setupMatch(cfg) {
   matchCfg = { mode: cfg.mode === 'battle' || cfg.mode === 'online' ? cfg.mode : 'practice', players: cfg.players ?? 2 };
   mode = matchCfg.mode;
-  puppet.active = false; // 整えている間は、相手への知らせを送らない（終わったら、通信対戦なら有効にする）
+  replica.active = false; relay.on = false; // 整えている間は、相手への知らせを送らない（終わったら、通信対戦なら有効にする）
   matchOver = null; matchEndT = 0;
   ko = null; koPending = false; hitStop = 0; flash = 0; slashes.length = 0;
+  // 相手（npcs[0]）: 通信対戦では、相手と同じ武器のレプリカ。それ以外では、もとのサンドバッグ・NPC（剣）
+  {
+    const n0 = npcs[0];
+    n0.ctl = n0.plain; n0.raw = n0.plain;
+    if (mode === 'online') {
+      replica.use(remoteReady ? remoteReady.w : 'sword');
+      replica.bindLocal(player, p1);
+      replica.guard = (m) => !(m.m === 'startUlt' && player.state === 'ult'); // 自分が必殺技の最中なら、相手の必殺技は再現しない（同時には、ムービーを流せない）
+      n0.ctl = replica.victim; n0.raw = replica.ctl;
+    } else if (n0.c.weapon !== 'sword') n0.c.setWeapon('sword');
+  }
   battleHud.hideResult();
   const count = mode === 'battle' ? Math.min(NPC_LOOKS.length, Math.max(1, matchCfg.players - 1)) : 1; // 通信対戦は、相手は1人
   activeNpcs = npcs.slice(0, count);
   resetFighter(player);
   for (const n of npcs) {
-    resetFighter(n.ctl);
+    resetFighter(n.raw);
     n.alive = activeNpcs.includes(n);
     n.dying = false; n.deathT = 0; n.flashT = 0; n.burnAcc = 0;
     n.brain = new NpcBrain(0.45 + 0.15 * n.id);
@@ -1020,8 +1050,12 @@ function setupMatch(cfg) {
   youTag.visible = mode !== 'practice';
   placeFighters();
   setFoe(activeNpcs[0]);
-  if (mode === 'online' && net) { puppet.start(net); puppet.placed = false; if (remoteReady) npcs[0].c.setWeapon(remoteReady.w); } else puppet.stop();
-  remoteKo = false; netAcc = 0; ultAway = false;
+  if (mode === 'online' && net) {
+    replica.start(net);
+    relay.on = true;
+    buildMirror(replica.weaponId); // 相手の技を、こちらの画面で再現する用意
+  } else { replica.stop(); mirror = null; }
+  remoteKo = false; netAcc = 0; ultAway = false; ultAwayPending = null;
   view.pivot.copy(p1.group.position);
   view.snapped = false;
   view.setBehind(p1.group.rotation.y);
@@ -1116,6 +1150,9 @@ let flashPlayer = 0;
 let flashPlayerOn = false;
 
 // 出血（チェンソー）: 今狙っている相手の分は、ここで 0.5 秒ごとにダメージを入れる（通信対戦の相手は、届いた状態異常を見て数える）
+// 自分の必殺技のムービーが流れているか（相手の必殺技のムービーを、同じ演出で再現しているときは、含めない）
+const localCineOn = () => ultDirector.active && !(mirror && mirror.cineOn);
+let replicaDt = 0;   // 通信対戦: 今のフレームで、相手のレプリカを進めた時間（キャラの姿勢を進める時間も、これに合わせる）
 let bleedAcc = 0;
 function bleedTick(dt) {
   if (!dummy.status.has('bleed') || matchOver || ultDirector.active) { bleedAcc = 0; return; }
@@ -1131,7 +1168,16 @@ function updateNpcs(dt, realDt) {
     // 通信対戦: 相手のキャラは、届いた情報のとおりに動かす（自分の必殺技のムービー中は、ムービーが位置を決める）
     player.grace = Math.max(0, (player.grace ?? 0) - dt);
     flashPlayer = Math.max(0, flashPlayer - realDt);
-    if (ultDirector.active) puppet.ctl.status.update(dt); else puppet.update(realDt);
+    const rc = replica.ctl;
+    replicaDt = 0;
+    if (localCineOn()) rc.status.update(dt);   // 自分の必殺技のムービー中は、相手のレプリカは止める
+    else {
+      // 相手の時間は、こちらのヒットストップに関係なく、実時間で進める（相手の端末の進み方に合わせるため）。相手の必殺技の締めのスローは、相手と同じにかける
+      replicaDt = realDt * (rc.ult ? rc.ult.timeScale : 1);
+      replica.update(replicaDt);
+      const evs = replica.takeEvents();
+      if (evs) mirrorEvents(evs);               // 相手の技のイベントを、こちらの画面で再現する
+    }
     return;
   }
   const frozen = ultDirector.active; // 必殺技のムービー中は、相手以外の動きを止める
@@ -1218,6 +1264,7 @@ function scanDeaths(realDt) {
   if (mode === 'online') {
     // 通信対戦: 自分の体力は自分の端末が数える。0 になったら負け（相手へ知らせる）。相手が倒れた知らせが届いたら勝ち（必殺技の最中なら、終わってから）
     if (!matchOver) {
+      if (mirror && mirror.cineOn) return; // 相手の必殺技のムービーの最中は、終わってから決める
       if (player.health.ko) { net && net.send({ k: 'ko' }); loseMatch(); }
       else if (remoteKo && player.state !== 'ult') winMatch();
     }
@@ -1279,7 +1326,7 @@ function loseMatch() {
 }
 // ムービーの最中は、相手以外の人と名前札を隠す（ムービーの舞台に、ほかの人が映り込まないように）
 function syncBattleView() {
-  const cine = ultDirector.active;
+  const cine = ultDirector.active || !!(mirror && mirror.cineOn && mode === 'online'); // 自分の必殺技・相手の必殺技のムービーの最中
   for (const n of npcs) {
     n.c.group.visible = n.alive && (!cine || n.ctl === dummy);
     n.tag.visible = mode !== 'practice' && n.alive && !cine;
@@ -1308,11 +1355,17 @@ function updateResult(realDt) {
 
 // ---- ローカル通信対戦（1対1）----
 // 流れ: モード選択 → つなぐ（部屋をつくる / 入る）→ 武器選択 → おたがいの準備ができたら試合。仕組みは src/net/Remote.js の説明を参照。
-let ultAway = false;   // 通信対戦: 相手の必殺技が当たっている間（自分も相手も、闘技場から消えている）
+//  相手のキャラは「レプリカ」（相手と同じ武器の本物のコントローラ）。相手が技を始めたら（act）、こちらのレプリカも同じ技を始め、
+//  その動き・飛んでいく球・文字・必殺技のムービーを、こちらの画面で再現する（ミラー。buildMirror / runAsRemote）。
+let ultAway = false;   // （保険）相手の必殺技が当たっているのに、レプリカが必殺技を始めなかったとき: 自分も相手も、闘技場から消す
 let ultAwayT = 0;
+let ultAwayPending = null;
 let myReady = false;
 let rematchMine = false;
 let rematchTheirs = false;
+let latestCmd = { x: 0, z: 0, run: false, attack: false, skillHold: false };
+const NET_INTERVAL = 1 / 30;   // 位置・状態を送る間隔（秒）
+const r2 = (v) => Math.round(v * 100) / 100;
 const moveLocked = (k) => { const s = k.state; return s === 'ult' || s === 'skill' || s === 'skill2' || s === 'skill3' || s === 'skill4' || s === 'airSlam' || s === 'finisher' || s.startsWith('bskill'); }; // 技の最中は、相手の技を受けない
 function cancelMoves(k) {
   for (const fn of ['cancelBat', 'cancelFang', 'cancelArrow', 'cancelOnom', 'cancelSaw']) if (typeof k[fn] === 'function') k[fn]();
@@ -1341,9 +1394,11 @@ function onRemoteDamage(n) {
 function attachNet(n) {
   n.on('hello', (m) => { if (m.build !== BUILD) leaveOnline('ゲームの版がちがいます（自分: ' + BUILD + ' / あいて: ' + m.build + '）。ふたりとも、ページを開き直してください'); });
   n.on('ready', (m) => { remoteReady = m; if (myReady) startOnlineMatch(); });
-  n.on('snap', (m) => puppet.onSnap(m));
+  n.on('snap', (m) => replica.onSnap(m));
+  n.on('act', (m) => replica.onAct(m));
   n.on('force', (m) => {
     if (mode !== 'online' || !started || player.state === 'ult') return;
+    if (replica.holdingLocal()) return; // こちらのレプリカが、同じ技で自分を動かしている（そちらを信じる）。レプリカが動いていないときだけ、相手の知らせで動かす
     const forcing = m.st === 'held' || m.st === 'thrown';
     const wasForced = player.state === 'held' || player.state === 'thrown';
     if (forcing && !wasForced && moveLocked(player)) return;
@@ -1352,16 +1407,15 @@ function attachNet(n) {
     applyForce(player, p1, m);
   });
   n.on('ult', (m) => {
-    // 相手の必殺技が当たった（または終わった）。当たっている間は、自分も相手も、闘技場から消える
+    // 相手の必殺技が当たった（または終わった）。ふつうは、レプリカが同じ必殺技（ムービー）を再現する。
+    // 0.6 秒たっても、レプリカが必殺技を始めなかったときの保険: 当たっている間は、自分も相手も、闘技場から消す
     if (mode !== 'online' || !started) return;
     if (m.on) {
       if (player.state === 'ult') return; // 自分も必殺技の最中なら、そのまま
-      cancelMoves(player);
-      player.state = 'held'; player.vx = player.vz = player.vy = 0;
-      ultAway = true; ultAwayT = 0;
+      ultAwayPending = { t: 0 };
     } else {
-      ultAway = false;
-      if (player.state === 'held') player.state = 'ground'; // 相手の最後の知らせが届かなかったときの保険
+      ultAwayPending = null;
+      if (ultAway) { ultAway = false; if (player.state === 'held') player.state = 'ground'; }
     }
   });
   n.on('hit', onRemoteHit);
@@ -1414,8 +1468,8 @@ function notice(text) {
 // 通信対戦をやめて、モード選択へ
 function leaveOnline(msg) {
   if (net) { net.onClose = () => {}; net.close(); net = null; }
-  puppet.stop();
-  myReady = false; remoteReady = null; rematchMine = rematchTheirs = false; remoteKo = false; ultAway = false;
+  replica.stop(); relay.on = false;
+  myReady = false; remoteReady = null; rematchMine = rematchTheirs = false; remoteKo = false; ultAway = false; ultAwayPending = null;
   if (weaponSelect && !weaponSelect.done) weaponSelect.dispose();
   battleHud.hideResult();
   battleHud.setWait(null);
@@ -1426,23 +1480,117 @@ function onlineClosed(reason) {
   if (!net) return;
   if (started && mode === 'online') {
     // 試合の途中・結果の表示中に切れた: 続けられないので、「モード選択へ」だけ出す
-    puppet.stop();
-    net = null; ultAway = false; p1.group.visible = true;
+    replica.stop(); relay.on = false;
+    net = null; ultAway = false; ultAwayPending = null; p1.group.visible = true;
     matchOver = matchOver ?? 'win'; matchEndT = -1;
     battleHud.showResult(false, { menu: () => leaveOnline() }, { title: '通信が切れました', message: reason, retry: false });
   } else {
     leaveOnline(reason);
   }
 }
-// 自分のキャラの様子を、0.05 秒ごとに相手へ送る
+// 自分のキャラの様子（位置・状態・体力と、動かしている向き）を、0.033 秒ごとに相手へ送る。相手を動かした分（force）も、ここで送る
 function netTick(realDt) {
   if (ultAway) { ultAwayT += realDt; if (ultAwayT > 25) { ultAway = false; if (player.state === 'held') player.state = 'ground'; } } // 知らせが届かないときの保険
+  if (ultAwayPending) {
+    ultAwayPending.t += realDt;
+    if (replica.ctl && replica.ctl.state === 'ult') ultAwayPending = null;   // レプリカが必殺技を再現している: 保険はいらない
+    else if (ultAwayPending.t > 0.6) {
+      ultAwayPending = null;
+      cancelMoves(player);
+      player.state = 'held'; player.vx = player.vz = player.vy = 0;
+      ultAway = true; ultAwayT = 0;
+    }
+  }
   if (mode !== 'online' || !started || !net || !net.open) return;
+  replica.flush(realDt);
   netAcc += realDt;
-  if (netAcc < 0.05) return;
+  if (netAcc < NET_INTERVAL) return;
   netAcc = 0;
-  if (ultDirector.active) return; // 必殺技のムービー中は、キャラがムービーの舞台にいる。送らない
-  net.send({ k: 'snap', ...takeSnapshot(player, p1) });
+  if (ultDirector.active || (mirror && mirror.cineOn)) return; // 必殺技のムービー中は、キャラがムービーの舞台にいる。送らない
+  const c = latestCmd;
+  net.sendU({ k: 'snap', t: Math.round(performance.now()), cx: r2(c.x), cz: r2(c.z), cr: c.run ? 1 : 0, ch: (c.attack ? 1 : 0) | (c.skillHold ? 2 : 0), ...takeState(player, p1) });
+}
+
+// ---- 相手の技の再現（ミラー）----
+// 相手のレプリカが出す技のイベントを、「相手が p1、自分が p2」に入れ替えて、いつもの技の処理（handleAttackEvent など）に通す。
+// ダメージ・画面の揺れ・ヒットストップは、こちらには入れない（本当のダメージ・のけぞりは、相手の端末から届く）。
+const mirrorHooks = {
+  hitStop: () => {},
+  flashFoe: (sec) => { flashPlayer = Math.max(flashPlayer, sec); },
+  damage: () => 0,
+  heal: () => 0,
+  groundBreak: (x, z, r) => groundBreak.trigger(x, z, r),
+  resetCamera: () => {},
+};
+const mirrorCache = new Map();
+function ultDirectorFor(w) { return w === 'saw' ? sawUlt : w === 'bat' ? batUlt : w === 'fang' ? fangUlt : w === 'arrow' ? arrowUlt : w === 'onom' ? onomUlt : swordUlt; }
+// 相手の武器に合わせて、ミラー用の演出（球・文字などを出すもの）を用意する。必殺技のムービーは、自分のものと同じ物を使い回す（同時には使わない）
+function buildMirror(w) {
+  let m = mirrorCache.get(w);
+  if (!m) {
+    m = {
+      weapon: w, slashes: [], dirs: [], cineOn: false,
+      bat: batDirector, fang: fangDirector, arrow: arrowDirector, onom: onomDirector, saw: sawDirector,
+      ult: ultDirectorFor(w),
+      get p1() { return npcs[0].c; }, get p2() { return meChar; }, get player() { return replica.ctl; }, get dummy() { return replica.ghost; },
+    };
+    const E = { scene, camera, impact, sparks, fx: noopFx, stage, hooks: mirrorHooks };
+    if (w === 'bat') m.bat = new BatDirector({ ...E, p1: npcs[0].c, p2: meChar, get dummy() { return replica.ghost; }, getPlayer: () => replica.ctl });
+    else if (w === 'fang') m.fang = new FangDirector({ ...E, p1: npcs[0].c, p2: meChar, get dummy() { return replica.ghost; }, getPlayer: () => replica.ctl, swarm: batSwarm });
+    else if (w === 'arrow') m.arrow = new ArrowDirector({ ...E, p1: npcs[0].c, p2: meChar, get dummy() { return replica.ghost; }, getPlayer: () => replica.ctl, foes: [meChar] });
+    else if (w === 'onom') m.onom = new OnomDirector({ ...E, p1: npcs[0].c, p2: meChar, get dummy() { return replica.ghost; }, getPlayer: () => replica.ctl });
+    else if (w === 'saw') m.saw = new ChainsawDirector({ ...E, p1: npcs[0].c, p2: meChar, get dummy() { return replica.ghost; }, getPlayer: () => replica.ctl, groundCracks });
+    for (const d of [m.bat, m.fang, m.arrow, m.onom, m.saw]) if (![batDirector, fangDirector, arrowDirector, onomDirector, sawDirector].includes(d)) m.dirs.push(d);
+    mirrorCache.set(w, m);
+    mirror = m;
+    warmRender(null); // 新しく作った物を、先に一度描いておく（試合中に初めて出るとき、止まらないように）
+  }
+  m.cineOn = false;
+  m.slashes.length = 0;
+  mirror = m;
+  return m;
+}
+// fn を、「相手の視点」で実行する: p1 = 相手のキャラ、p2 = 自分のキャラ、player = 相手のレプリカ、dummy = 自分（見た目だけ通す窓口）
+function runAsRemote(fn) {
+  if (!mirror || mirrorMode) return;
+  const sv = { p1, p2, player, dummy, slashes, ultDirector, batDirector, fangDirector, arrowDirector, onomDirector, sawDirector, fx, hitStop, flash };
+  p1 = mirror.p1; p2 = mirror.p2; player = mirror.player; dummy = mirror.dummy; slashes = mirror.slashes;
+  ultDirector = mirror.ult; batDirector = mirror.bat; fangDirector = mirror.fang; arrowDirector = mirror.arrow; onomDirector = mirror.onom; sawDirector = mirror.saw;
+  fx = mirror.cineOn ? realFx : noopFx;   // ムービーの最中は、カメラの演出（揺れ・ズーム）も使う
+  mirrorMode = true;
+  try {
+    fn();
+  } catch (err) {
+    reportRuntimeError('mirror', err);
+  } finally {
+    if (flash > 0) flashPlayer = Math.max(flashPlayer, flash);   // 「相手（=自分）を光らせる」は、自分のキャラへ
+    ({ p1, p2, player, dummy, slashes, ultDirector, batDirector, fangDirector, arrowDirector, onomDirector, sawDirector, fx, hitStop, flash } = sv);
+    mirrorMode = false;
+  }
+}
+// 相手のレプリカが出したイベントを、こちらの画面に再現する
+const mirrorStats = { events: {}, cines: 0, errors: 0 }; // 確認用: 相手のイベントを、いくつ再現したか
+function mirrorEvents(evs) {
+  for (const e of evs) mirrorStats.events[e.type] = (mirrorStats.events[e.type] ?? 0) + 1;
+  runAsRemote(() => { for (const e of evs) onAttackEvent(e); });
+  updateMirrorCine();
+}
+// 相手の必殺技のムービーが、今流れているか（始まり・終わりは、ムービーのイベントで決まる）
+function updateMirrorCine() {
+  const u = replica.ctl && replica.ctl.ult;
+  const was = mirror.cineOn;
+  mirror.cineOn = !!(u && u.phase === 'cine' && mirror.ult.active);
+  if (mirror.cineOn && !was) mirrorStats.cines++;
+}
+// 毎フレーム: 相手の演出（球・文字など）と、必殺技のムービーを進める
+function mirrorUpdate(dt, realDt) {
+  if (!mirror || mode !== 'online') return;
+  for (const d of mirror.dirs) guard('mirror:' + mirror.weapon, () => d.update(dt));
+  runAsRemote(() => {
+    if (mirror.weapon === 'sword') { updateSkill2Charge(realDt); updateSkill3(dt, realDt); updateTether(clock.elapsedTime); }
+    if (replica.ctl.ult || mirror.cineOn) ultDirector.update(realDt);
+  });
+  updateMirrorCine();
 }
 
 // ---- 試合前の武器選択 ----
@@ -1585,7 +1733,7 @@ window.game = {
   start: (id, cfg = {}) => { skipBoot(); if (cfg.mode) modeSelect.select(cfg.mode); if (cfg.players) modeSelect.setPlayers(cfg.players); modeSelect.confirm(); if (id) weaponSelect.select(id); weaponSelect.confirm(); },
   isStarted: () => started, weapon, fightHud, dealDamage, view, touch, stage, characters, npcs, camera, controls, scene, fx, createCharacter, follow: true, manual: false,
   get player() { return player; }, get ult() { return ultDirector; }, get dummy() { return dummy; }, get mode() { return mode; }, get matchOver() { return matchOver; }, get activeNpcs() { return activeNpcs; },
-  get net() { return net; }, get ultAway() { return ultAway; }, puppet, setupMatch, battleHud,
+  get net() { return net; }, get ultAway() { return ultAway; }, replica, mirrorStats, get mirror() { return mirror; }, setupMatch, battleHud,
 };
 
 addEventListener('resize', () => {
@@ -1614,7 +1762,14 @@ function step(realDt) {
 
   updateFoeChoice();
   const cmd = readCommand();
+  latestCmd = cmd;
+  if (relay.on && net) { // 通信対戦: ジャンプなどの「押した瞬間」を、相手のレプリカへ知らせる（技の開始は、コントローラの中継が知らせる）
+    if (cmd.jump) net.send({ k: 'act', p: 'jump' });
+    if (cmd.toggleStance) net.send({ k: 'act', p: 'stance' });
+  }
   player.update(dt, matchOver === 'lose' ? NO_INPUT : cmd);
+  // 自分と相手が、ほぼ同時に必殺技を出したとき: 自分の必殺技を優先する（同時に、ふたつのムービーは流せない）。相手のレプリカの必殺技は、やめさせる
+  if (mode === 'online' && player.state === 'ult' && replica.ctl && replica.ctl.ult) abortUlt(replica.ctl);
   updateNpcs(dt, realDt);
   bleedTick(dt);
   input.endFrame();
@@ -1677,7 +1832,7 @@ function step(realDt) {
     const frozen = ultDirector.active;
     for (const n of activeNpcs) {
       if (!n.alive || (frozen && n.ctl !== dummy)) continue;
-      n.c.update(dt, mode === 'battle' ? () => npcCheckHit(n) : undefined); // NPC も同じ。刃の位置で当たり判定
+      n.c.update(mode === 'online' ? replicaDt : dt, mode === 'battle' ? () => npcCheckHit(n) : undefined); // NPC も同じ。刃の位置で当たり判定（通信対戦の相手は、レプリカと同じ時間で姿勢を進める）
     }
   }
   scanDeaths(realDt);
@@ -1690,9 +1845,11 @@ function step(realDt) {
   guard('arrowDirector', () => arrowDirector.update(dt));
   guard('onomDirector', () => onomDirector.update(dt));
   guard('sawDirector', () => sawDirector.update(dt));
+  mirrorUpdate(dt, realDt); // 通信対戦: 相手の技の演出（球・文字・必殺技のムービー）
   guard('batSwarm', () => batSwarm.update(dt, clock.elapsedTime));
   impact.update(realDt); // 閃光や衝撃波はヒットストップ中も動かす
-  ultDirector.update(realDt);
+  // 相手の必殺技を再現している間、同じ演出が自分の分と共用のとき、自分の分の更新（何もしない更新）は、飛ばす
+  if (!(mirror && mode === 'online' && mirror.ult === ultDirector && replica.ctl && (replica.ctl.ult || mirror.cineOn))) ultDirector.update(realDt);
   groundBreak.update(realDt);
   groundCracks.update(realDt);
   updateSkill2Charge(realDt);
@@ -1703,7 +1860,9 @@ function step(realDt) {
   if (flashPlayer > 0 || flashPlayerOn) { flashPlayerOn = flashPlayer > 0; p1.setFlash(flashPlayerOn ? 1 : 0); } // 吸血牙の赤い光（setTint）を消さないよう、光らせた前後だけ呼ぶ
 
   // 追従カメラ。視点を触っていないときだけ、進行方向（攻撃中は狙った方向）の背後へゆっくり回り込む
-  if (ultDirector.active) {
+  if (mirror && mirror.cineOn && mode === 'online') {
+    runAsRemote(() => ultDirector.updateCamera()); // 相手の必殺技のムービー（ミラー）: 相手の視点で、カメラワークを決める
+  } else if (ultDirector.active) {
     ultDirector.updateCamera(); // 必殺技のムービー中は、カメラワークをディレクターが決める
   } else if (window.game.follow) {
     // 視点と移動は分離: 歩いても走ってもカメラの向きは変わらない。

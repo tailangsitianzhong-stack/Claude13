@@ -42,8 +42,13 @@ export class Net {
     this.role = null;        // 'host'（部屋をつくった側）| 'guest'
     this.code = '';
     this.peer = null;
-    this.conn = null;
+    this.conn = null;          // 確実に届く通路（順番どおり）: 当たり・技の開始・勝敗など
+    this.connU = null;         // 速い通路（順番は保証しない。最新だけ使う）: 位置・姿勢の知らせ
+    this.evOpen = false;
+    this.stOpen = false;
+    this.stGaveUp = false;
     this.open = false;
+    this.rtt = 0;              // 往復にかかる時間（ミリ秒）。ping で測る
     this.handlers = new Map(); // メッセージの種類 k → [fn]
     this.onStatus = () => {};  // (text, kind) 状態の表示用
     this.onOpen = () => {};    // つながった
@@ -55,7 +60,13 @@ export class Net {
 
   on(k, fn) { if (!this.handlers.has(k)) this.handlers.set(k, []); this.handlers.get(k).push(fn); }
   emit(k, m) { for (const fn of this.handlers.get(k) ?? []) fn(m); }
-  send(m) { if (this.open && this.conn) { try { this.conn.send(m); } catch (e) { /* 切れたら onClose が来る */ } } }
+  // 確実に届く通路（順番どおり）。ping は、つながる前（ev が開いた直後）にも使う
+  send(m) { if ((this.open || this.evOpen) && this.conn) { try { this.conn.send(m); } catch (e) { /* 切れたら onClose が来る */ } } }
+  // 速い通路（古い知らせが追い越されることがある。受ける側は、番号で古いものを捨てる）。開いていなければ、確実な通路で送る
+  sendU(m) {
+    if (this.stOpen && this.connU) { try { this.connU.send(m); return; } catch (e) { /* 確実な通路へ */ } }
+    this.send(m);
+  }
 
   // 部屋をつくる: コードを決めて、相手が入ってくるのを待つ
   async host() {
@@ -69,8 +80,10 @@ export class Net {
       this.peer = peer;
       peer.on('open', () => this.onStatus('相手を待っています…', 'wait', this.code));
       peer.on('connection', (c) => {
-        if (this.conn) { c.close(); return; } // 1対1: 2人目は断る
-        this.attach(c);
+        // 1対1: 確実な通路（ev）と速い通路（st）を、1本ずつ受ける。3本目以降・2人目は断る
+        if (c.label === 'ev' && !this.conn) this.attach(c, 'ev');
+        else if (c.label === 'st' && !this.connU) this.attach(c, 'st');
+        else c.close();
       });
       peer.on('error', (err) => {
         if (err.type === 'unavailable-id' && n < 5) { peer.destroy(); tryOpen(n + 1); return; } // コードが使われていたら、つくり直す
@@ -92,8 +105,8 @@ export class Net {
     const peer = new Peer(undefined, peerOptions());
     this.peer = peer;
     peer.on('open', () => {
-      const c = peer.connect(PREFIX + this.code, { reliable: true, serialization: 'json' });
-      this.attach(c);
+      this.attach(peer.connect(PREFIX + this.code, { label: 'ev', reliable: true, serialization: 'json' }), 'ev');
+      this.attach(peer.connect(PREFIX + this.code, { label: 'st', reliable: false, serialization: 'json' }), 'st');
       setTimeout(() => { if (!this.open && !this.closed) this.fail('つながりません。コードをたしかめて、もう一度ためしてください'); }, 15000);
     });
     peer.on('error', (err) => this.fail(this.describe(err)));
@@ -106,25 +119,38 @@ export class Net {
     return '通信エラー: ' + (t || (err && err.message) || err);
   }
 
-  attach(c) {
-    this.conn = c;
+  attach(c, kind) {
+    if (kind === 'st') this.connU = c; else this.conn = c;
     c.on('open', () => {
-      this.open = true;
+      if (kind === 'st') { this.stOpen = true; this.checkOpen(); return; }
+      this.evOpen = true;
       this.lastRecv = performance.now();
-      // 切れたことに早く気づくための、見張り（2 秒ごとに ping、7 秒なにも届かなければ切れたとみなす）
+      // 切れたことに早く気づくための、見張り（2 秒ごとに ping、7 秒なにも届かなければ切れたとみなす）。往復の時間も、ここで測る
       this.pingTimer = setInterval(() => {
-        this.send({ k: 'ping' });
+        this.send({ k: 'ping', t: performance.now() });
         if (performance.now() - this.lastRecv > 7000) this.fail('あいてとの通信が切れました');
       }, 2000);
-      this.onStatus('つながりました！', 'ok');
-      this.onOpen();
+      this.send({ k: 'ping', t: performance.now() });
+      // 速い通路が開かないネットワークでは、確実な通路だけで続ける（4 秒待つ）
+      setTimeout(() => { if (!this.stOpen) { this.stGaveUp = true; this.checkOpen(); } }, 4000);
+      this.checkOpen();
     });
     c.on('data', (m) => {
       this.lastRecv = performance.now();
-      if (m && m.k && m.k !== 'ping') this.emit(m.k, m);
+      if (!m || !m.k) return;
+      if (m.k === 'ping') { this.send({ k: 'pong', t: m.t }); return; }
+      if (m.k === 'pong') { const r = performance.now() - m.t; this.rtt = this.rtt ? this.rtt * 0.7 + r * 0.3 : r; return; }
+      this.emit(m.k, m);
     });
-    c.on('close', () => this.fail('あいてとの通信が切れました'));
-    c.on('error', (e) => this.fail(this.describe(e)));
+    c.on('close', () => { if (kind === 'st') { this.stOpen = false; return; } this.fail('あいてとの通信が切れました'); });
+    c.on('error', (e) => { if (kind === 'st') { this.stOpen = false; this.stGaveUp = true; this.checkOpen(); return; } this.fail(this.describe(e)); });
+  }
+
+  checkOpen() {
+    if (this.open || this.closed || !this.evOpen || !(this.stOpen || this.stGaveUp)) return;
+    this.open = true;
+    this.onStatus('つながりました！', 'ok');
+    this.onOpen();
   }
 
   fail(reason) {
@@ -138,6 +164,7 @@ export class Net {
     this.open = false;
     clearInterval(this.pingTimer);
     try { this.conn && this.conn.close(); } catch (e) { /* 閉じるだけ */ }
+    try { this.connU && this.connU.close(); } catch (e) { /* 閉じるだけ */ }
     try { this.peer && this.peer.destroy(); } catch (e) { /* 閉じるだけ */ }
   }
 }
