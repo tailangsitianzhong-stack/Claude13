@@ -29,6 +29,7 @@ const CSS = `
 #weapon-select .card .icon { height: min(22vh, 110px); display: grid; place-items: center; }
 #weapon-select .card .icon svg { height: 100%; filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5)); }
 #weapon-select .card .name { font: 900 22px/1 system-ui, sans-serif; letter-spacing: 0.3em; margin: 4px 0 6px 0.3em; }
+#weapon-select .card .name.long { font-size: 18px; letter-spacing: 0.04em; margin-left: 0; white-space: nowrap; }
 #weapon-select .card .desc { font-size: 11px; line-height: 1.5; color: #c8dcff; min-height: 3em; }
 #weapon-select .card .stats { margin-top: 6px; display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; font-size: 10px; color: #9fc4ff; text-align: left; }
 #weapon-select .card .bar { display: flex; gap: 2px; align-items: center; }
@@ -122,7 +123,7 @@ export class WeaponSelect {
       el.className = 'card';
       el.dataset.id = w.id;
       const stats = Object.entries(w.stats ?? {}).map(([k, n]) => `<span>${STAT_LABELS[k] ?? k}</span><span class="bar">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</span>`).join('');
-      el.innerHTML = `<div class="icon">${ICONS[w.id] ?? ''}</div><div class="name">${w.name}</div><div class="desc">${w.desc}</div><div class="stats">${stats}</div>`;
+      el.innerHTML = `<div class="icon">${ICONS[w.id] ?? ''}</div><div class="name${w.name.length > 4 ? ' long' : ''}">${w.name}</div><div class="desc">${w.desc}</div><div class="stats">${stats}</div>`;
       el.addEventListener('click', () => this.select(w.id)); // スライドしたときは選ばない（click は、指を動かすと出ない）
       cards.appendChild(el);
     }
