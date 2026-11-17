@@ -22,6 +22,8 @@ import { WeaponSelect } from './ui/WeaponSelect.js';
 import { ModeSelect } from './ui/ModeSelect.js';
 import { BattleHud } from './ui/BattleHud.js';
 import { NPC_LOOKS, NpcBrain, createNameTag } from './game/Npc.js';
+import { Lobby } from './ui/Lobby.js';
+import { Puppet, takeSnapshot, applyForce } from './net/Remote.js';
 import { getWeapon } from './game/weapons.js';
 import { CineOverlay } from './cinematic/CineOverlay.js';
 import { UltimateDirector } from './cinematic/UltimateDirector.js';
@@ -92,6 +94,11 @@ for (let i = 0; i < NPC_LOOKS.length; i++) {
 }
 const youTag = createNameTag('YOU', '#7fd0ff');
 { const h = p1.height / p1.scale; youTag.scale.set(h * 0.65, h * 0.1625, 1); youTag.position.set(0, h + 0.9, 0); p1.group.add(youTag); }
+// 通信対戦の相手（npcs[0] を、相手の端末のキャラとして動かす）。通信対戦モードのときだけ有効
+const puppet = new Puppet(npcs[0]);
+let net = null;
+const origTagMap = npcs[0].tag.material.map;
+const rivalTagMap = createNameTag('RIVAL', '#ff8a7d').material.map;
 // 今狙っている相手（練習モードでは常に npcs[0]。バトルモードでは、いちばん近い相手に切り替わる）。
 // 技の処理（ダメージ・演出）は、すべてこの p2 / dummy に対して行う
 let p2 = npcs[0].c;
@@ -937,9 +944,12 @@ function resetFighter(k) {
 
 function placeFighters() {
   const list = [p1, ...activeNpcs.map((n) => n.c)];
-  if (mode === 'practice') {
-    p1.group.position.set(-0.6, 0, 0); p1.group.rotation.y = Math.PI / 2;
-    npcs[0].c.group.position.set(0.6, 0, 0); npcs[0].c.group.rotation.y = -Math.PI / 2;
+  if (mode === 'practice' || mode === 'online') {
+    // 練習: 自分が左、相手が右。通信対戦: 部屋をつくった人が左、入った人が右（どちらも、自分から見て相手のほうを向く）
+    const left = mode === 'practice' || !net || net.role === 'host';
+    const a = left ? -0.7 : 0.7;
+    p1.group.position.set(a, 0, 0); p1.group.rotation.y = left ? Math.PI / 2 : -Math.PI / 2;
+    npcs[0].c.group.position.set(-a, 0, 0); npcs[0].c.group.rotation.y = left ? -Math.PI / 2 : Math.PI / 2;
     return;
   }
   // バトル: 円形に並んで、中央を向く（自分は手前＝カメラ側）
@@ -951,6 +961,9 @@ function placeFighters() {
   });
 }
 
+let remoteReady = null; // 通信対戦: 相手が選んだ武器 { w }
+let remoteKo = false;   // 通信対戦: 相手が倒れた知らせが届いた
+let netAcc = 0;
 function refreshRemaining() {
   const left = 1 + activeNpcs.filter(foeAlive).length;
   battleHud.setRemaining(left, activeNpcs.length + 1, mode === 'battle');
@@ -958,12 +971,13 @@ function refreshRemaining() {
 
 // 試合を始める（またはやり直す）
 function setupMatch(cfg) {
-  matchCfg = { mode: cfg.mode === 'battle' ? 'battle' : 'practice', players: cfg.players ?? 2 };
+  matchCfg = { mode: cfg.mode === 'battle' || cfg.mode === 'online' ? cfg.mode : 'practice', players: cfg.players ?? 2 };
   mode = matchCfg.mode;
+  puppet.active = false; // 整えている間は、相手への知らせを送らない（終わったら、通信対戦なら有効にする）
   matchOver = null; matchEndT = 0;
   ko = null; koPending = false; hitStop = 0; flash = 0; slashes.length = 0;
   battleHud.hideResult();
-  const count = mode === 'battle' ? Math.min(NPC_LOOKS.length, Math.max(1, matchCfg.players - 1)) : 1;
+  const count = mode === 'battle' ? Math.min(NPC_LOOKS.length, Math.max(1, matchCfg.players - 1)) : 1; // 通信対戦は、相手は1人
   activeNpcs = npcs.slice(0, count);
   resetFighter(player);
   for (const n of npcs) {
@@ -972,11 +986,14 @@ function setupMatch(cfg) {
     n.dying = false; n.deathT = 0; n.flashT = 0; n.burnAcc = 0;
     n.brain = new NpcBrain(0.45 + 0.15 * n.id);
     n.c.group.visible = n.alive;
-    n.tag.visible = mode === 'battle' && n.alive;
+    n.tag.visible = mode !== 'practice' && n.alive;
   }
-  youTag.visible = mode === 'battle';
+  npcs[0].tag.material.map = mode === 'online' ? rivalTagMap : origTagMap;
+  youTag.visible = mode !== 'practice';
   placeFighters();
   setFoe(activeNpcs[0]);
+  if (mode === 'online' && net) { puppet.start(net); puppet.placed = false; if (remoteReady) npcs[0].c.setWeapon(remoteReady.w); } else puppet.stop();
+  remoteKo = false; netAcc = 0;
   view.pivot.copy(p1.group.position);
   view.snapped = false;
   view.setBehind(p1.group.rotation.y);
@@ -1071,6 +1088,13 @@ let flashPlayer = 0;
 let flashPlayerOn = false;
 
 function updateNpcs(dt, realDt) {
+  if (mode === 'online') {
+    // 通信対戦: 相手のキャラは、届いた情報のとおりに動かす（自分の必殺技のムービー中は、ムービーが位置を決める）
+    player.grace = Math.max(0, (player.grace ?? 0) - dt);
+    flashPlayer = Math.max(0, flashPlayer - realDt);
+    if (ultDirector.active) puppet.ctl.status.update(dt); else puppet.update(realDt);
+    return;
+  }
   const frozen = ultDirector.active; // 必殺技のムービー中は、相手以外の動きを止める
   player.grace = Math.max(0, (player.grace ?? 0) - dt);
   flashPlayer = Math.max(0, flashPlayer - realDt);
@@ -1095,6 +1119,7 @@ function updateNpcs(dt, realDt) {
 
 // 立っている相手は、狙っている人のほうを向く（気絶中は、ふらふらしたまま向き直らない）
 function faceFoes(dt) {
+  if (mode === 'online') return; // 向きは、相手から届く
   for (const n of activeNpcs) {
     if (!n.alive || n.dying) continue;
     const k = n.ctl;
@@ -1127,8 +1152,8 @@ function separateFighters() {
       if (a.isP && b.n.ctl === dummy && grappling) continue;
       if (a.isP && player.state === 'ult') continue;
       const nx = sx / sep; const nz = sz / sep;
-      if (a.isP && mode === 'practice') {
-        // 練習: 相手は動かない。自分を外へ押し出す
+      if (a.isP && mode !== 'battle') {
+        // 練習・通信: 相手は動かない（通信の相手は、相手の端末が位置を決める）。自分を外へ押し出す
         a.c.group.position.x = b.c.group.position.x + nx * minDist;
         a.c.group.position.z = b.c.group.position.z + nz * minDist;
       } else {
@@ -1147,6 +1172,14 @@ function separateFighters() {
 
 // ---- 脱落・勝敗 ----
 function scanDeaths(realDt) {
+  if (mode === 'online') {
+    // 通信対戦: 自分の体力は自分の端末が数える。0 になったら負け（相手へ知らせる）。相手が倒れた知らせが届いたら勝ち（必殺技の最中なら、終わってから）
+    if (!matchOver) {
+      if (player.health.ko) { net && net.send({ k: 'ko' }); loseMatch(); }
+      else if (remoteKo && player.state !== 'ult') winMatch();
+    }
+    return;
+  }
   if (mode !== 'battle') return;
   const ultBusy = player.state === 'ult'; // 必殺技の最中は、終わってから脱落にする
   for (const n of activeNpcs) {
@@ -1206,9 +1239,9 @@ function syncBattleView() {
   const cine = ultDirector.active;
   for (const n of npcs) {
     n.c.group.visible = n.alive && (!cine || n.ctl === dummy);
-    n.tag.visible = mode === 'battle' && n.alive && !cine;
+    n.tag.visible = mode !== 'practice' && n.alive && !cine;
   }
-  youTag.visible = mode === 'battle' && !cine;
+  youTag.visible = mode !== 'practice' && !cine;
 }
 // 勝敗が決まったら、少ししてから結果（もう一度 / モード選択へ）を出す
 function updateResult(realDt) {
@@ -1216,11 +1249,135 @@ function updateResult(realDt) {
   matchEndT += realDt;
   if (matchEndT > 2.6) {
     matchEndT = -1;
+    if (mode === 'online') { showOnlineResult(); return; }
     battleHud.showResult(matchOver === 'win', {
       retry: () => { setupMatch(matchCfg); fightHud.showBanner('READY', 'FIGHT!'); },
       menu: () => backToMenu(),
     });
   }
+}
+
+// ---- ローカル通信対戦（1対1）----
+// 流れ: モード選択 → つなぐ（部屋をつくる / 入る）→ 武器選択 → おたがいの準備ができたら試合。仕組みは src/net/Remote.js の説明を参照。
+let myReady = false;
+let rematchMine = false;
+let rematchTheirs = false;
+const moveLocked = (k) => { const s = k.state; return s === 'ult' || s === 'skill' || s === 'skill2' || s === 'skill3' || s === 'skill4' || s === 'airSlam' || s === 'finisher' || s.startsWith('bskill'); }; // 技の最中は、相手の技を受けない
+function cancelMoves(k) {
+  for (const fn of ['cancelBat', 'cancelFang', 'cancelArrow', 'cancelOnom']) if (typeof k[fn] === 'function') k[fn]();
+  k.sk = null; k.s2 = null; k.s3 = null; k.s4 = null; if ('bs' in k) k.bs = null;
+  k.attackActive = false; k.c.animator.trailOn = false;
+}
+// 相手の攻撃が当たった（相手の端末が当たりを決めて、知らせてくる）
+function onRemoteHit(m) {
+  if (mode !== 'online' || !started || !HURTABLE.has(player.state)) return;
+  player.hit(m.dx, m.dz, m.power);
+  const strong = m.power > 1;
+  flashPlayer = 0.09;
+  hitStop = Math.max(hitStop, strong ? 0.1 : 0.05);
+  fx.shake(strong ? 0.7 : 0.35);
+  const len = Math.hypot(m.dx, m.dz) || 1;
+  v1.set(p1.group.position.x, p1.group.position.y + p1.height * 0.6, p1.group.position.z);
+  forward.set(m.dx / len, 0, m.dz / len);
+  sparks.burst(v1, forward, strong ? 16 : 9, p1.height * (strong ? 0.07 : 0.055), p1.height * 3.2);
+  impact.flash(v1, p1.height * (strong ? 2.2 : 1.5), strong ? 0.18 : 0.13);
+}
+function onRemoteDamage(n) {
+  if (mode !== 'online' || !started || moveLocked(player)) return;
+  const dealt = player.health.damage(n);
+  if (dealt > 0) fightHud.popDamage(v1.set(p1.group.position.x, p1.group.position.y + p1.height * 0.7, p1.group.position.z), dealt, dealt >= 45 ? 'big' : '');
+}
+function attachNet(n) {
+  n.on('hello', (m) => { if (m.build !== BUILD) leaveOnline('ゲームの版がちがいます（自分: ' + BUILD + ' / あいて: ' + m.build + '）。ふたりとも、ページを開き直してください'); });
+  n.on('ready', (m) => { remoteReady = m; if (myReady) startOnlineMatch(); });
+  n.on('snap', (m) => puppet.onSnap(m));
+  n.on('force', (m) => {
+    if (mode !== 'online' || !started || player.state === 'ult') return;
+    const forcing = m.st === 'held' || m.st === 'thrown';
+    const wasForced = player.state === 'held' || player.state === 'thrown';
+    if (forcing && !wasForced && moveLocked(player)) return;
+    if (!forcing && !wasForced && moveLocked(player)) return;
+    if (forcing && !wasForced) cancelMoves(player);
+    applyForce(player, p1, m);
+  });
+  n.on('hit', onRemoteHit);
+  n.on('launch', (m) => { if (mode === 'online' && started && !moveLocked(player)) { cancelMoves(player); player.launch(m.dx, m.dz, m.speed, m.up); } });
+  n.on('status', (m) => { if (mode === 'online' && started && player.state !== 'ult') player.status.apply(m.name, m.d); });
+  n.on('dmg', (m) => onRemoteDamage(m.n));
+  n.on('ko', () => { remoteKo = true; });
+  n.on('rematch', () => { rematchTheirs = true; checkRematch(); });
+  n.on('bye', () => leaveOnline('あいてが、もどりました'));
+  n.onClose = (reason) => onlineClosed(reason);
+}
+function connectOnline(n) {
+  net = n;
+  myReady = false; remoteReady = null; rematchMine = rematchTheirs = false; remoteKo = false;
+  attachNet(n);
+  n.send({ k: 'hello', build: BUILD });
+  pendingCfg = { mode: 'online', players: 2 };
+  openWeaponSelect();
+}
+// 両方の準備ができた: 試合を始める
+function startOnlineMatch() {
+  if (started || !myReady || !remoteReady) return;
+  battleHud.setWait(null);
+  setupMatch({ mode: 'online', players: 2 });
+  started = true;
+  document.body.classList.remove('pre-match');
+  fightHud.showBanner('READY', 'FIGHT!');
+}
+function showOnlineResult() {
+  const win = matchOver === 'win';
+  rematchMine = false;
+  battleHud.showResult(win, {
+    retry: () => { rematchMine = true; net && net.send({ k: 'rematch' }); battleHud.setRetryWaiting('あいてを待っています…'); checkRematch(); return 'keep'; },
+    menu: () => { net && net.send({ k: 'bye' }); leaveOnline(); },
+  });
+}
+function checkRematch() {
+  if (!rematchMine || !rematchTheirs) return;
+  rematchMine = rematchTheirs = false;
+  battleHud.hideResult();
+  setupMatch({ mode: 'online', players: 2 });
+  fightHud.showBanner('READY', 'FIGHT!');
+}
+let noticeTimer = 0;
+function notice(text) {
+  battleHud.setWait(text);
+  clearTimeout(noticeTimer);
+  noticeTimer = setTimeout(() => battleHud.setWait(null), 5000);
+}
+// 通信対戦をやめて、モード選択へ
+function leaveOnline(msg) {
+  if (net) { net.onClose = () => {}; net.close(); net = null; }
+  puppet.stop();
+  myReady = false; remoteReady = null; rematchMine = rematchTheirs = false; remoteKo = false;
+  if (weaponSelect && !weaponSelect.done) weaponSelect.dispose();
+  battleHud.hideResult();
+  battleHud.setWait(null);
+  backToMenu();
+  if (msg) notice(msg);
+}
+function onlineClosed(reason) {
+  if (!net) return;
+  if (started && mode === 'online') {
+    // 試合の途中・結果の表示中に切れた: 続けられないので、「モード選択へ」だけ出す
+    puppet.stop();
+    net = null;
+    matchOver = matchOver ?? 'win'; matchEndT = -1;
+    battleHud.showResult(false, { menu: () => leaveOnline() }, { title: '通信が切れました', message: reason, retry: false });
+  } else {
+    leaveOnline(reason);
+  }
+}
+// 自分のキャラの様子を、0.05 秒ごとに相手へ送る
+function netTick(realDt) {
+  if (mode !== 'online' || !started || !net || !net.open) return;
+  netAcc += realDt;
+  if (netAcc < 0.05) return;
+  netAcc = 0;
+  if (ultDirector.active) return; // 必殺技のムービー中は、キャラがムービーの舞台にいる。送らない
+  net.send({ k: 'snap', ...takeSnapshot(player, p1) });
 }
 
 // ---- 試合前の武器選択 ----
@@ -1242,6 +1399,14 @@ function onWeaponChosen(id) {
   if (id === 'onom') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（ドン→グラグラ→メラメラ）　3段目を当てたあとの Space: コンボ（ドロドロ）　T / G: 必殺技（ドカン・ズドン・バンバン）　K / E: スキル1（ドカン）→ 使用後はスキル3（グルグル）　L / Q: スキル2（スー）→ 使用後はスキル4（ドキドキ）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   if (id === 'arrow') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ（空中の攻撃はなし）　左クリック / J: 攻撃（加速パンチ→ダッシュ蹴り→押さえつけ連打）　3段目を当てたあとの Space: コンボ（地面を隆起）　T / G: 必殺技（前向き矢印）　K / E: スキル1（砲弾）→ 使用後はスキル3（加速ダッシュ）　L / Q: スキル2（高く飛んで叩きつけ）→ 使用後はスキル4（鈍足矢印）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
   if (id === 'fang') hud.textContent = 'WASD / 矢印: 移動　Shift: 走る　Space: ジャンプ　左クリック / J: 攻撃（噛みつき→爪の薙ぎ払い→首に噛みつく）　ジャンプ中に攻撃: かぎ爪×3　T / G: 必殺技（赤い宝石）　K / E: スキル1（赤い斬撃・吸血）→ 使用後はスキル3（分身）　L / Q: スキル2（巨大蝙蝠の突進）→ 使用後はスキル4（足を蝙蝠にして回転）　F: 立ち⇔構え　｜　右ドラッグ: 視点　ホイール: 距離';
+  if (pendingCfg.mode === 'online') {
+    // 通信対戦: 武器を選んだことを相手へ知らせ、相手も選び終えるのを待ってから始める
+    myReady = true;
+    net && net.send({ k: 'ready', w: id });
+    if (remoteReady) startOnlineMatch(); else battleHud.setWait('あいての準備を待っています…');
+    window.game.weapon = weapon;
+    return;
+  }
   setupMatch(pendingCfg); // モードに合わせて、人数・位置・体力を整える
   started = true;
   document.body.classList.remove('pre-match');
@@ -1253,14 +1418,24 @@ let weaponSelect = null;
 function openWeaponSelect() {
   weaponSelect = new WeaponSelect(onWeaponChosen, { hold: false, initial: lastWeapon });
 }
-let modeSelect = new ModeSelect((cfg) => { pendingCfg = cfg; openWeaponSelect(); }, { hold: true }); // スタート画面とロードのあとに出す
+// モード選択の決定: 通信対戦は先に「つなぐ」。それ以外は、武器選択へ
+function onModeChosen(cfg) {
+  pendingCfg = cfg;
+  if (cfg.mode === 'online') {
+    new Lobby({
+      onConnected: (n) => connectOnline(n),
+      onBack: () => { modeSelect = new ModeSelect(onModeChosen, { hold: false }); },
+    });
+  } else openWeaponSelect();
+}
+let modeSelect = new ModeSelect(onModeChosen, { hold: true }); // スタート画面とロードのあとに出す
 // 試合の結果から「モード選択へ」: 試合を止めて、モード選択へ戻る
 function backToMenu() {
   started = false;
   document.body.classList.add('pre-match');
   setupMatch({ mode: 'practice', players: 2 }); // 後ろに映る舞台は、練習の配置
   battleHud.setRemaining(0, 0, false);
-  modeSelect = new ModeSelect((cfg) => { pendingCfg = cfg; openWeaponSelect(); }, { hold: false });
+  modeSelect = new ModeSelect(onModeChosen, { hold: false });
 }
 // 試合前は、HP・ボタンなどの表示を隠す
 document.body.classList.add('pre-match');
@@ -1344,7 +1519,7 @@ window.game = {
   start: (id, cfg = {}) => { skipBoot(); if (cfg.mode) modeSelect.select(cfg.mode); if (cfg.players) modeSelect.setPlayers(cfg.players); modeSelect.confirm(); if (id) weaponSelect.select(id); weaponSelect.confirm(); },
   isStarted: () => started, weapon, fightHud, dealDamage, view, touch, stage, characters, npcs, camera, controls, scene, fx, createCharacter, follow: true, manual: false,
   get player() { return player; }, get ult() { return ultDirector; }, get dummy() { return dummy; }, get mode() { return mode; }, get matchOver() { return matchOver; }, get activeNpcs() { return activeNpcs; },
-  setupMatch, battleHud,
+  get net() { return net; }, puppet, setupMatch, battleHud,
 };
 
 addEventListener('resize', () => {
@@ -1441,6 +1616,7 @@ function step(realDt) {
   scanDeaths(realDt);
   updateResult(realDt);
   syncBattleView();
+  netTick(realDt);
   sparks.update(dt, camera, p1.height * 1.1);
   guard('batDirector', () => batDirector.update(dt));
   guard('fangDirector', () => fangDirector.update(dt));

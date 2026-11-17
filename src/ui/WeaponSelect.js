@@ -120,6 +120,13 @@ export class WeaponSelect {
     this.done = false;
   }
 
+  // 通信が切れたときなど、選ばずに閉じる
+  dispose() {
+    this.done = true;
+    removeEventListener('keydown', this.onKey);
+    this.root.remove();
+  }
+
   show() {
     this.held = false;
     this.root.classList.remove('wait');

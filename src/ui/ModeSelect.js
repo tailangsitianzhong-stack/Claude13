@@ -1,7 +1,7 @@
 // モード選択画面（武器選択の前に出る）。
 //   練習モード      : 立っている相手（サンドバッグ）を相手に、技を試す。反撃はない
 //   バトルモード    : NPC と対戦。自分を入れて 2〜4 人（最後まで立っていた人の勝ち）
-// 【メモ】ローカル通信対戦モードは、方法を決めてから作る（まだ作らない）。
+//   ローカル通信対戦: 別の端末と1対1（WebRTC ＋ 部屋コード。src/net）
 const CSS = `
 #mode-select { position: fixed; inset: 0; z-index: 41; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 16px; overflow-y: auto; overflow-x: hidden;
   -webkit-overflow-scrolling: touch; overscroll-behavior: contain; background: radial-gradient(ellipse at 50% 30%, #2a4a8a 0%, #101a38 62%, #060a18 100%); color: #fff; font-family: system-ui, sans-serif;
@@ -15,7 +15,7 @@ const CSS = `
 #mode-select.out { opacity: 0; pointer-events: none; }
 #mode-select h1 { margin: 0; font: 900 min(7vw, 36px)/1 system-ui, sans-serif; letter-spacing: 0.3em; text-shadow: 0 0 18px #4fd8ff, 0 3px 0 #04203d; }
 #mode-select .sub { margin-top: -6px; font-size: 12px; letter-spacing: 0.3em; color: #9fd4ff; }
-#mode-select .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; width: 100%; max-width: 640px; }
+#mode-select .cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; width: 100%; max-width: 820px; }
 #mode-select .card { box-sizing: border-box; min-width: 0; padding: 14px 14px 16px; border-radius: 14px; text-align: center; cursor: pointer; position: relative;
   background: linear-gradient(#1b3366, #0f1c40); border: 3px solid rgba(255,255,255,0.35); box-shadow: 0 6px 0 #040a1c, 0 8px 18px rgba(0,0,0,0.45);
   transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s; }
@@ -31,12 +31,14 @@ const CSS = `
   color: #5a1a00; background: linear-gradient(#fff59d, #ff9800); box-shadow: 0 5px 0 #8a1c10, 0 0 18px 4px rgba(255,160,40,0.6); }
 #mode-select .go:active { transform: translateY(3px); box-shadow: 0 2px 0 #8a1c10; }
 #mode-select .note { font-size: 10px; color: #7f9cd0; letter-spacing: 0.1em; }
+@media (max-width: 560px) { #mode-select .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-height: 420px) { #mode-select { gap: 8px; } #mode-select .card .icon { font-size: 28px; } #mode-select .card .desc { min-height: 0; } }
 `;
 
 export const MODES = [
   { id: 'practice', name: '練習モード', icon: '🎯', desc: '立っている相手を相手に、技を試す。反撃はなく、倒しても復活する。' },
   { id: 'battle', name: 'バトルモード', icon: '⚔', desc: 'NPC と対戦。自分を入れて 2〜4 人で戦い、最後まで立っていた人の勝ち。NPC どうしも戦う。' },
+  { id: 'online', name: 'ローカル通信対戦', icon: '📡', desc: '別の端末の人と、1対1。部屋コードでつなぐ（インターネットにつながっていればOK）。' },
 ];
 
 export class ModeSelect {
@@ -58,7 +60,7 @@ export class ModeSelect {
     if (hold) this.root.classList.add('wait');
     this.root.innerHTML = `<h1>モード選択</h1><div class="sub">SELECT MODE</div><div class="cards"></div>
       <div class="count"><span>対戦人数（自分を入れて）</span><button type="button" data-n="2">2人</button><button type="button" data-n="3">3人</button><button type="button" data-n="4">4人</button></div>
-      <button class="go" type="button">決 定</button><div class="note">次に、武器を選びます</div>`;
+      <button class="go" type="button">決 定</button><div class="note">次に、武器を選びます（通信対戦は、先につなぎます）</div>`;
     document.body.appendChild(this.root);
     const cards = this.root.querySelector('.cards');
     for (const m of MODES) {
