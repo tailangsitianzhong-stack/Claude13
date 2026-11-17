@@ -105,13 +105,7 @@ export class ArrowController extends CharacterController {
     }
     // ジャンプ中の攻撃はない
     if (this.state === 'air' && cmd.attack) cmd = { ...cmd, attack: false };
-    // コンボ: 3段目を当てたあと、ジャンプボタンで、地面に上向き矢印を貼って隆起させる
-    if (cmd.jump && this.finisherWindow > 0 && this.canGrab() && (this.state === 'ground' || (this.state === 'attack' && this.attackT > 0.9)) && !this.status.has('stun')) {
-      this.cancelPress(false);
-      this.startArrowSkill(5);
-      this.status.update(dt);
-      return;
-    }
+    // コンボ: 3段目を当てたあと、ジャンプボタンで、地面に上向き矢印を貼って隆起させる（基底の update が、canGrab と finisherWindow を見て、startFinisher を呼ぶ）
     if (this.state === 'ground' && !this.status.has('stun') && this.jumpBuffer <= 0) {
       const can = this.c.sword && !(cmd.ult && this.canUlt());
       if (can && cmd.skill && this.skill3Ready) { this.startArrowSkill(3); this.status.update(dt); return; }
@@ -122,6 +116,12 @@ export class ArrowController extends CharacterController {
     if (cmd.skill || cmd.skill2) cmd = { ...cmd, skill: false, skill2: false };
     super.update(dt, cmd);
     this.updateAttackExtras(dt);
+  }
+
+  // 基底の update が、コンボ技を出すときに呼ぶ。矢印では、つかみ技ではなく、地面を隆起させるコンボになる
+  startFinisher() {
+    this.cancelPress(false);
+    this.startArrowSkill(5);
   }
 
   startAttack(index, cmd) {
@@ -262,7 +262,7 @@ export class ArrowController extends CharacterController {
     else if (n === 2) this.beginSkill2();
     else if (n === 3) this.beginSkill3();
     else if (n === 4) this.beginSkill4();
-    else this.beginFinisher();
+    else this.beginArrowFinisher();
   }
 
   updateArrowSkill(dt) {
@@ -271,7 +271,7 @@ export class ArrowController extends CharacterController {
       case 2: this.updateSkill2(dt); break;
       case 3: this.updateSkill3(dt); break;
       case 4: this.updateSkill4(dt); break;
-      default: this.updateFinisher(dt); break;
+      default: this.updateArrowFinisher(dt); break;
     }
   }
 
@@ -517,7 +517,9 @@ export class ArrowController extends CharacterController {
   // ============================================================
   // コンボ: 地面に上向き矢印を貼って、地面を隆起させる範囲攻撃
   // ============================================================
-  beginFinisher() {
+  // 【注意】基底クラスにも startFinisher / updateFinisher（剣のつかみ技）がある。名前をそろえて上書きすると、基底の更新から
+  // 意図しない呼び出しが起きて、固まる原因になる（実際に起きた）。ここは別の名前にして、startFinisher だけを上書きする
+  beginArrowFinisher() {
     const b = this.bs;
     const S = this.c.scale;
     const g = this.c.group;
@@ -532,7 +534,7 @@ export class ArrowController extends CharacterController {
     this.events.push({ type: 'arrowFinStart' });
   }
 
-  updateFinisher(dt) {
+  updateArrowFinisher(dt) {
     const { group, animator, scale: S } = this.c;
     const K = AFIN;
     const b = this.bs;
